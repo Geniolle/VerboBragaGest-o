@@ -1,0 +1,23 @@
+[project]
+name = "pastoreio-orquestrador"
+version = "0.1.0"
+description = "Orquestrador de alocacao automatica de colaboradores (porte do Algoritimo_Input_Escala_Automatico_v63 para Python)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gspread>=6.1.0",
+    "google-auth>=2.34.0",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[project.scripts]
+pastoreio-orquestrador = "pastoreio_orquestrador:main"
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"

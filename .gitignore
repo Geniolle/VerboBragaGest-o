@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Segredos - NUNCA versionar a chave da service account
+credentials/*.json
+.env
+
+# Saidas de investigacao/depuracao pontuais, nao fazem parte do codigo
+scratch/

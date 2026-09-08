@@ -51,7 +51,18 @@ class SlotAgenda:
     semana_do_mes: int
     is_ultima_ocorrencia_do_mes: bool
     valor_atual: str = ""
+    # Colunas ASSIDUIDADE1..30 de AppAnualGlobal -> nome do colaborador
+    # marcado como AUSENTE (nao pode ser escalado) naquela data ali
+    # registrado. Nao e generico/ruido: e um nome de coluna real, tratado
+    # igual as colunas de `papeis` por `esta_bloqueado_por_excluse` em
+    # motor.py (ver nota no topo do motor.py).
     assiduidade: dict[str, str] = field(default_factory=dict)
+    # Nome do papel/funcao (igual a coluna "COLUNAS" da aba Excluse, ex.:
+    # "PORTARIA FRENTE1", "PROFESSOR(A) (S1)") -> nome do colaborador
+    # alocado ali nessa data, lido direto das colunas nomeadas reais de
+    # AppAnualGlobal. Usado por `esta_bloqueado_por_excluse` em motor.py,
+    # junto com `assiduidade`.
+    papeis: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

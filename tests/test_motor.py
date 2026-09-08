@@ -6,6 +6,7 @@ from pastoreio_orquestrador.motor import (
     alocar_grupo,
     calcular_demanda_onda_expansiva,
 )
+from pastoreio_orquestrador.parsing_utils import week_of_month
 
 
 def _regra(nome: str, **overrides) -> RegraColaborador:
@@ -19,7 +20,10 @@ def _regra(nome: str, **overrides) -> RegraColaborador:
         repeticao_mensal=1,
         alocar_todos_os_meses=False,
         semana_preferencial=0,
-        ceia_alternada=False,
+        # True por padrao: a maioria dos testes deste arquivo nao testa a
+        # regra de CEIA ALTERNADA (1o domingo do mes), entao o fixture
+        # precisa deixar todo mundo elegivel para nao ser bloqueado por ela.
+        ceia_alternada=True,
         semana_alternada=False,
         alocacao_extra=0,
         atribuir_aos_recados=False,
@@ -40,7 +44,7 @@ def _slot(row_index: int, d: date) -> SlotAgenda:
         dia_da_semana="QUARTA-FEIRA",
         tema="",
         mes_key=f"{d.year:04d}-{d.month:02d}",
-        semana_do_mes=1,
+        semana_do_mes=week_of_month(d),
         is_ultima_ocorrencia_do_mes=False,
     )
 
@@ -87,8 +91,23 @@ def test_alocar_grupo_distribui_entre_dois_candidatos_respeitando_descanso():
     assert vencedores[0] != vencedores[1]
 
 
-def test_alocar_grupo_marca_sem_alocacao_quando_quota_esgotada():
-    regras = [_regra("Ana", repeticao_mensal=1)]
+def test_alocar_grupo_resgata_com_quota_esgotada_quando_tem_alocacao_extra():
+    # Cota mensal esgotada nao gera SEM ALOCACAO se o resgate consegue
+    # reaproveitar o mesmo (unico) candidato -- mas o resgate (corrigido
+    # 2026-09-07, pedido do Clayton) so aceita quem tem ALOCAR TODOS OS
+    # MESES=false E ALOCAÇÃO EXTRA=true; dentro desse pool restrito, os
+    # unicos filtros sao Excluse e conflito de vizinhanca (cota mensal,
+    # descanso minimo e tema nao bloqueiam).
+    #
+    # CORRECAO 2026-09-07 (mesmo dia, pedido do Clayton -- "a regra da
+    # vizinhanca... esse doi e sobre a datas"): resgatar o UNICO candidato
+    # para a data seguinte da mesma sequencia semanal do grupo violaria a
+    # "vizinhanca de datas" (repeticao em datas consecutivas), que agora e
+    # um filtro obrigatorio mesmo dentro do resgate. Com um unico candidato
+    # no grupo inteiro nao ha ninguem para reorganizar -- SEM ALOCACAO passa
+    # a ser o resultado correto (era impossivel alocar sem repetir em
+    # sequencia).
+    regras = [_regra("Ana", repeticao_mensal=1, alocacao_extra=1)]
     slots = [_slot(1, date(2026, 1, 7)), _slot(2, date(2026, 1, 14))]
     estado = EstadoExecucaoGrupo()
     limites = {"Ana": 1}  # so uma vaga liberada para Ana neste periodo
@@ -96,8 +115,57 @@ def test_alocar_grupo_marca_sem_alocacao_quando_quota_esgotada():
     decisoes = alocar_grupo(regras, slots, estado, limites)
 
     assert decisoes[0].vencedor == "Ana"
-    assert decisoes[1].sem_alocacao is True
+    assert decisoes[0].motivo == "ALOCAÇÃO NORMAL"
     assert decisoes[1].vencedor is None
+    assert decisoes[1].sem_alocacao is True
+
+
+def test_alocar_grupo_nao_resgata_sem_alocacao_extra_mesmo_sendo_unico_candidato():
+    # Mesmo cenario acima, mas sem ALOCAÇÃO EXTRA=true: o resgate nao pode
+    # reaproveitar Ana (ela nao esta explicitamente marcada como disponivel
+    # para cota extra), entao a vaga fica SEM ALOCAÇÃO.
+    regras = [_regra("Ana", repeticao_mensal=1, alocacao_extra=0)]
+    slots = [_slot(1, date(2026, 1, 7)), _slot(2, date(2026, 1, 14))]
+    estado = EstadoExecucaoGrupo()
+    limites = {"Ana": 1}
+
+    decisoes = alocar_grupo(regras, slots, estado, limites)
+
+    assert decisoes[0].vencedor == "Ana"
+    assert decisoes[1].vencedor is None
+    assert decisoes[1].sem_alocacao is True
+
+
+def test_vizinhanca_de_datas_impede_repeticao_em_datas_consecutivas():
+    # "Vizinhanca de DATAS" (2026-09-07, correcao do Clayton: "esse doi e
+    # sobre a datas e nao sobre as funcoes") -- ninguem pode vencer duas
+    # datas cronologicamente CONSECUTIVAS da propria sequencia do grupo. Ana
+    # (prioridade 1) venceria as 3 datas seguidas por desempate de
+    # prioridade se essa regra nao existisse; com ela, Bia entra na 2a data
+    # e Ana volta na 3a (nao e mais vizinha da 1a, ja que a 2a ficou entre
+    # elas).
+    regras = [_regra("Ana", prioridade=1), _regra("Bia", prioridade=2)]
+    slots = [
+        _slot(1, date(2026, 1, 7)),
+        _slot(2, date(2026, 1, 14)),
+        _slot(3, date(2026, 1, 21)),
+    ]
+    estado = EstadoExecucaoGrupo()
+    limites = {"Ana": 100, "Bia": 100}
+
+    decisoes = alocar_grupo(regras, slots, estado, limites)
+
+    assert [d.vencedor for d in decisoes] == ["Ana", "Bia", "Ana"]
+
+
+def test_alocar_grupo_marca_sem_alocacao_quando_nao_ha_nenhum_candidato():
+    slots = [_slot(1, date(2026, 1, 7))]
+    estado = EstadoExecucaoGrupo()
+
+    decisoes = alocar_grupo([], slots, estado, {})
+
+    assert decisoes[0].sem_alocacao is True
+    assert decisoes[0].vencedor is None
 
 
 def test_alocar_grupo_sincronizacao_ignora_descanso_minimo():
@@ -120,3 +188,77 @@ def test_alocar_grupo_sincronizacao_ignora_descanso_minimo():
     # Ambas as linhas devem ter vencedor (SINC permite ignorar o descanso).
     assert decisoes[0].vencedor is not None
     assert decisoes[1].vencedor is not None
+
+
+def test_delimitar_uma_ronda_estende_ate_fechar_o_mes():
+    from pastoreio_orquestrador.motor import delimitar_uma_ronda
+
+    datas = [
+        date(2026, 10, 4), date(2026, 10, 11), date(2026, 10, 18), date(2026, 10, 25),
+        date(2026, 11, 1), date(2026, 11, 8), date(2026, 11, 15), date(2026, 11, 22),
+        date(2026, 11, 29), date(2026, 12, 6), date(2026, 12, 13),
+    ]
+    ronda = delimitar_uma_ronda(datas, n_colaboradores_ativos=7)
+    assert ronda == datas[:9]
+
+
+def test_delimitar_uma_ronda_sem_extensao_quando_mes_ja_fecha_exato():
+    from pastoreio_orquestrador.motor import delimitar_uma_ronda
+
+    datas = [date(2026, 10, 4), date(2026, 10, 11), date(2026, 11, 1)]
+    ronda = delimitar_uma_ronda(datas, n_colaboradores_ativos=2)
+    assert ronda == [date(2026, 10, 4), date(2026, 10, 11)]
+
+
+def test_descanso_cruzado_bloqueia_mesma_pessoa_em_outro_dia_da_semana_muito_perto():
+    # "Descanso minimo cruzado" (2026-09-08, pedido do Clayton apos achar
+    # casos reais de MINISTRO alocado num domingo e de novo poucos dias
+    # depois na quarta-feira seguinte, ex.: Ana Lima em 11/10/2026 (domingo)
+    # e 14/10/2026 (quarta) -- so 3 dias, bem menos que os 7 exigidos).
+    # Ana venceria por prioridade se o compromisso externo nao bloqueasse.
+    regras = [_regra("Ana", prioridade=1), _regra("Bia", prioridade=2)]
+    slots = [_slot(1, date(2026, 1, 14))]  # quarta-feira
+    estado = EstadoExecucaoGrupo()
+    limites = {"Ana": 100, "Bia": 100}
+    # Compromisso ja confirmado de Ana no domingo anterior, 3 dias antes.
+    compromissos_cruzados = {"ANA": [date(2026, 1, 11)]}
+
+    decisoes = alocar_grupo(
+        regras, slots, estado, limites, compromissos_cruzados=compromissos_cruzados
+    )
+
+    assert decisoes[0].vencedor == "Bia"
+
+
+def test_descanso_cruzado_tambem_bloqueia_quando_o_compromisso_externo_e_no_futuro():
+    # O compromisso "externo" pode ser cronologicamente DEPOIS do slot sendo
+    # decidido agora (ex.: a Ronda do outro dia da semana ja foi escrita
+    # antes) -- ao contrario de `respeita_descanso_minimo` (que so enxerga
+    # o que ja foi decidido antes, dentro do proprio grupo), aqui o
+    # compromisso futuro ja e um fato fixo e tambem deve bloquear.
+    regras = [_regra("Ana", prioridade=1), _regra("Bia", prioridade=2)]
+    slots = [_slot(1, date(2026, 1, 14))]  # quarta-feira
+    estado = EstadoExecucaoGrupo()
+    limites = {"Ana": 100, "Bia": 100}
+    # Compromisso ja confirmado de Ana no domingo SEGUINTE, so 4 dias depois.
+    compromissos_cruzados = {"ANA": [date(2026, 1, 18)]}
+
+    decisoes = alocar_grupo(
+        regras, slots, estado, limites, compromissos_cruzados=compromissos_cruzados
+    )
+
+    assert decisoes[0].vencedor == "Bia"
+
+
+def test_descanso_cruzado_fica_sem_alocacao_quando_e_o_unico_candidato():
+    regras = [_regra("Ana", prioridade=1)]
+    slots = [_slot(1, date(2026, 1, 14))]
+    estado = EstadoExecucaoGrupo()
+    compromissos_cruzados = {"ANA": [date(2026, 1, 11)]}
+
+    decisoes = alocar_grupo(
+        regras, slots, estado, {}, compromissos_cruzados=compromissos_cruzados
+    )
+
+    assert decisoes[0].vencedor is None
+    assert decisoes[0].motivo == "SEM ALOCAÇÃO"

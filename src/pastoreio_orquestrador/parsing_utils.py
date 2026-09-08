@@ -27,7 +27,10 @@ def parse_int(valor: object, default: int = 0) -> int:
     try:
         return int(float(texto.replace(",", ".")))
     except ValueError:
-        return default
+        # Colunas como ALOCAÇÃO EXTRA sao usadas tanto como quantidade
+        # numerica (ex.: "1") quanto como checkbox booleano (ex.: "TRUE") --
+        # sem isso, um valor "TRUE" seria descartado silenciosamente para 0.
+        return 1 if parse_bool(valor) else default
 
 
 def parse_date_ddmmyyyy(texto: str) -> date | None:

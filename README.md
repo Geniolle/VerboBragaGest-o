@@ -91,6 +91,13 @@ tests/
 
 Rode `uv run python scripts/checklist_pre_alocacao.py` para ver as propostas E+F contra os dados reais (só leitura).
 
+## Conceito de ciclo
+
+Ver [`CONCEITO_CICLO.md`](CONCEITO_CICLO.md) para o que significa "ciclo" e
+"ciclo completo" na rotação de colaboradores — importante para não repetir
+a confusão de achar que o ciclo é só `N` datas (colaboradores ativos) sem
+considerar o fechamento do mês calendário.
+
 ## Estado atual
 
 - Acesso a spreadsheet real validado (todas as 7 abas usadas pelo algoritmo

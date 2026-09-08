@@ -6,6 +6,7 @@ nunca por posicao fixa, para tolerar colunas reordenadas/adicionadas."""
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from pastoreio_orquestrador.columns import (
     ColAppAnualGlobal,
@@ -92,14 +93,52 @@ def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColabor
 
 
 def extrair_assiduidade_da_linha(row: list[str], idx: dict[str, int]) -> dict[str, str]:
-    """Le as 30 colunas genericas ASSIDUIDADE1..30 de uma linha de
-    AppAnualGlobal. O significado de cada uma (a qual departamento/funcao
-    pertence) e resolvido depois, consultando a aba Excluse."""
+    """Le as 30 colunas ASSIDUIDADE1..30 de uma linha de AppAnualGlobal --
+    cada uma registra o colaborador AUSENTE (indisponivel para escala)
+    naquela data, nao sao genericas nem ruido. Qual ASSIDUIDADEn conflita
+    com qual departamento/funcao e resolvido consultando a aba Excluse (ver
+    `esta_bloqueado_por_excluse` em motor.py)."""
     return {
         col: valor
         for col in ColAppAnualGlobal.colunas_assiduidade()
         if (valor := get(row, idx, col).strip())
     }
+
+
+# Colunas de AppAnualGlobal que NAO representam um "papel" (funcao com um
+# colaborador alocado) -- sao metadados da linha ou rotulos de secao (cujo
+# proprio valor e so o nome da secao, ex.: DIACONATO="DIACONATO"). Excluidas
+# de `extrair_papeis_da_linha` junto com toda coluna "EMAIL ..." e
+# "ASSIDUIDADE<n>" (essa ultima tratada a parte, ver `extrair_assiduidade_da_linha`).
+_COLUNAS_METADADOS_APPANUALGLOBAL = {
+    "PERÍODO", "MÊS", "DIA DA SEMANA", "DATA", "MINISTROS", "EVENTO 1",
+    "TEMA", "LINK", "TEMA DA MINISTRAÇÃO", "SLIDES", "VIDEO", "YOUTUBE",
+    "DIACONATO", "CRIANÇAS", "LOUVOR", "COMUNICAÇÃO", "LIVRARIA", "CANTINA",
+    "CENTRO DE CURA", "LIÇÃO (D.I)", "LIÇÃO (S2)", "LIÇÃO (S3)", "LIÇÃO (S4)",
+} | {f"VERSICULO{i}" for i in range(1, 11)}
+
+
+def extrair_papeis_da_linha(row: list[str], idx: dict[str, int]) -> dict[str, str]:
+    """Le todas as colunas de "papel" (funcao com um colaborador alocado,
+    ex.: "PORTARIA FRENTE1", "PROFESSOR(A) (S1)") de uma linha de
+    AppAnualGlobal -- qualquer coluna que nao seja metadado/rotulo de
+    secao, "EMAIL ..." ou "ASSIDUIDADE<n>" -- mapeando NOME DO PAPEL (igual
+    ao usado na coluna "COLUNAS" da aba Excluse) para o NOME do colaborador
+    alocado ali nessa data. Usado por `esta_bloqueado_por_excluse` em
+    motor.py para achar conflitos reais entre papeis (ver nota no topo do
+    motor.py)."""
+    papeis: dict[str, str] = {}
+    for col_name, col_i in idx.items():
+        if col_name in _COLUNAS_METADADOS_APPANUALGLOBAL:
+            continue
+        if col_name.upper().startswith("EMAIL"):
+            continue
+        if col_name.upper().startswith("ASSIDUIDADE"):
+            continue
+        valor = row[col_i].strip() if col_i < len(row) else ""
+        if valor:
+            papeis[col_name] = valor
+    return papeis
 
 
 def carregar_slots_agenda(valores: list[list[str]]) -> list[SlotAgenda]:
@@ -127,6 +166,7 @@ def carregar_slots_agenda(valores: list[list[str]]) -> list[SlotAgenda]:
                 semana_do_mes=week_of_month(d),
                 is_ultima_ocorrencia_do_mes=is_last_occurrence_of_month(d),
                 assiduidade=extrair_assiduidade_da_linha(row, idx),
+                papeis=extrair_papeis_da_linha(row, idx),
             )
         )
     return slots
@@ -236,3 +276,56 @@ def carregar_excluse_matriz(valores: list[list[str]]) -> tuple[dict[str, int], l
     if not valores:
         return {}, []
     return build_header_index(valores[0]), valores[1:]
+
+
+def carregar_compromissos_cruzados(
+    agenda_valores: list[list[str]],
+    col_nome: str,
+    dia_da_semana_excluido: str,
+) -> dict[str, list[date]]:
+    """Le AppAnualGlobal/CLAUDE_AppAnualGlobal inteira e devolve, para a MESMA
+    coluna de funcao (`col_nome`, ex.: "MINISTRO") mas em qualquer DIA DA
+    SEMANA diferente de `dia_da_semana_excluido`, {NOME em maiusculas:
+    [datas ja confirmadas]}. Usado para o filtro "descanso minimo cruzado"
+    (2026-09-08, pedido do Clayton): a mesma pessoa nao pode ser escalada na
+    MESMA funcao em dois dias da semana diferentes (ex.: domingo e a quarta-
+    feira seguinte) se a distancia for menor que `DESCANSO_MINIMO_DIAS` --
+    ver `esta_bloqueado_por_descanso_cruzado` em motor.py. Ignora celulas
+    vazias e o literal "SEM ALOCAÇÃO" (nao e um compromisso real)."""
+    if not agenda_valores:
+        return {}
+    idx = build_header_index(agenda_valores[0])
+    compromissos: dict[str, list[date]] = {}
+    for row in agenda_valores[1:]:
+        dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
+        if not dia or dia_da_semana_excluido.strip().upper() in dia:
+            continue
+        nome = get(row, idx, col_nome).strip()
+        if not nome or nome.upper() == "SEM ALOCAÇÃO":
+            continue
+        data = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
+        if data is None:
+            continue
+        compromissos.setdefault(nome.upper(), []).append(data)
+    return compromissos
+
+
+def carregar_aniversarios(valores: list[list[str]]) -> dict[str, date]:
+    """Le a aba BP SERVICE e devolve {NOME em maiusculas: data_de_nascimento},
+    para o filtro obrigatorio de "nao alocar o aniversariante no proprio dia
+    de servico" (pedido do Clayton, 2026-09-07 -- ver caso real do Ronda 1:
+    Patricia Lopes nasceu em 25/10 e foi alocada em 25/10/2026). Linhas sem
+    NOME ou sem DATA NASCIMENTO parseavel sao ignoradas."""
+    if not valores:
+        return {}
+    idx = build_header_index(valores[0])
+    aniversarios: dict[str, date] = {}
+    for row in valores[1:]:
+        nome = get(row, idx, "NOME").strip().upper()
+        if not nome:
+            continue
+        nascimento = parse_date_ddmmyyyy(get(row, idx, "DATA NASCIMENTO").strip())
+        if nascimento is None:
+            continue
+        aniversarios[nome] = nascimento
+    return aniversarios

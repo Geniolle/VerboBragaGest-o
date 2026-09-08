@@ -1,10 +1,13 @@
-"""Teste de integracao end-to-end contra dados REAIS, sem tocar nas abas
-originais: duplica BP ALGORITIMO e AppAnualGlobal para CLAUDE_BP ALGORITIMO
-e CLAUDE_AppAnualGlobal, roda o motor para o grupo D. MINISTROS / MINISTRO /
-QUARTA-FEIRA e escreve o resultado somente na copia CLAUDE_.
+"""Teste de integracao real (proposta F) para o grupo D. MINISTROS /
+MINISTRO / DOMINGO, a partir de outubro/2026.
+
+Diferente de `testar_ministros_quarta.py`, este script NAO duplica as abas
+originais de novo -- reaproveita as copias `CLAUDE_BP ALGORITIMO` /
+`CLAUDE_AppAnualGlobal` ja existentes (criadas pelo teste de quarta-feira),
+para nao perder o resultado ja gravado la. So escreve em abas `CLAUDE_*`.
 
 Uso:
-    uv run python scripts/testar_ministros_quarta.py
+    uv run python scripts/testar_ministros_domingo.py
 """
 
 from __future__ import annotations
@@ -47,24 +50,31 @@ from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 DEPARTAMENTO = "D. MINISTROS"
 FUNCAO = "MINISTRO"
-DIA_DA_SEMANA = "QUARTA-FEIRA"
+DIA_DA_SEMANA = "DOMINGO"
 COL_NOME = "MINISTRO"
-COL_EMAIL = "EMAIL MINISTRO"
 COL_TEMA = "TEMA DA MINISTRAÇÃO"
+INICIO = date(2026, 10, 1)
+
+TITULO_BP_ALGORITIMO = "CLAUDE_BP ALGORITIMO"
+TITULO_APP_ANUAL_GLOBAL = "CLAUDE_AppAnualGlobal"
 
 
 def main() -> None:
     settings = load_settings()
     guard = SpreadsheetGuard(settings)
 
-    print("Duplicando abas originais para copias de teste (CLAUDE_*)...")
-    ws_regras = guard.duplicate_sheet_for_testing("BP ALGORITIMO")
-    ws_agenda = guard.duplicate_sheet_for_testing("AppAnualGlobal")
-    print(f"  -> {ws_regras.title}")
-    print(f"  -> {ws_agenda.title}")
+    titulos = guard.list_worksheet_titles()
+    for titulo in (TITULO_BP_ALGORITIMO, TITULO_APP_ANUAL_GLOBAL):
+        if titulo not in titulos:
+            raise RuntimeError(
+                f"'{titulo}' nao existe. Rode primeiro um teste que a crie "
+                f"(ex.: scripts/testar_ministros_quarta.py) antes deste."
+            )
 
-    regras_raw = guard.read_worksheet(ws_regras.title)
-    agenda_raw = guard.read_worksheet(ws_agenda.title)
+    print(f"Reaproveitando copias de teste existentes: '{TITULO_BP_ALGORITIMO}' e '{TITULO_APP_ANUAL_GLOBAL}'.")
+
+    regras_raw = guard.read_worksheet(TITULO_BP_ALGORITIMO)
+    agenda_raw = guard.read_worksheet(TITULO_APP_ANUAL_GLOBAL)
     livros_raw = guard.read_worksheet("Livros")  # leitura, aba original OK
     excluse_raw = guard.read_worksheet("Excluse")  # leitura, aba original OK
     excluse_header, excluse_rows = carregar_excluse_matriz(excluse_raw)
@@ -77,9 +87,10 @@ def main() -> None:
         if r.departamento == DEPARTAMENTO and r.funcao == FUNCAO and DIA_DA_SEMANA in r.dia_da_semana
     ]
     print(f"\nRegras ativas no grupo {DEPARTAMENTO}/{FUNCAO}/{DIA_DA_SEMANA}: {len(grupo)}")
+    for r in grupo:
+        print(f"  - {r.nome}")
 
     idx_agenda = build_header_index(agenda_raw[0])
-    hoje = date.today()
 
     slots: list[SlotAgenda] = []
     for row_i, row in enumerate(agenda_raw[1:], start=1):
@@ -88,7 +99,7 @@ def main() -> None:
             continue
         data_txt = get(row, idx_agenda, ColAppAnualGlobal.DATA).strip()
         d = parse_date_ddmmyyyy(data_txt)
-        if d is None or d < hoje:
+        if d is None or d < INICIO:
             continue
         valor_atual = get(row, idx_agenda, COL_NOME).strip()
         if valor_atual:
@@ -107,9 +118,9 @@ def main() -> None:
         )
         slots.append(slot)
 
-    print(f"Slots futuros e vazios encontrados: {len(slots)}")
+    print(f"Slots de {DIA_DA_SEMANA} a partir de {INICIO.isoformat()}, vazios: {len(slots)}")
     if not slots:
-        print("Nada para alocar (sem slots futuros vazios). Fim.")
+        print("Nada para alocar (sem slots vazios no periodo). Fim.")
         return
 
     meses_tocados = len({s.mes_key for s in slots})
@@ -145,15 +156,13 @@ def main() -> None:
             req = requisitos_tema.get(d.slot.row_index, "-")
             print(f"  {d.slot.data} (tema={d.slot.tema!r}, requisito={req}) -> {d.vencedor} [{d.motivo}]")
 
-    # Escreve o resultado apenas na copia CLAUDE_ (guard bloqueia qualquer
-    # tentativa de escrita em aba sem o prefixo).
-    print(f"\nEscrevendo resultado em '{ws_agenda.title}' (copia de teste)...")
+    print(f"\nEscrevendo resultado em '{TITULO_APP_ANUAL_GLOBAL}' (copia de teste)...")
     idx_col_nome = idx_agenda[COL_NOME] + 1  # gspread e 1-based
     for d in decisoes:
         if d.vencedor is None:
             continue
         linha_sheet = d.slot.row_index + 1  # row_index=1 (1a linha de dados) -> linha 2 na sheet (apos cabecalho)
-        ws_agenda.update_cell(linha_sheet, idx_col_nome, d.vencedor)
+        guard.update_cell(TITULO_APP_ANUAL_GLOBAL, linha_sheet, idx_col_nome, d.vencedor)
 
     print(f"\nRegistando auditoria em '{NOME_ABA_AUDITORIA}'...")
     guard.ensure_worksheet_with_header(NOME_ABA_AUDITORIA, CABECALHO_AUDITORIA)

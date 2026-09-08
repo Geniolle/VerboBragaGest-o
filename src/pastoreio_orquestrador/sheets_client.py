@@ -89,6 +89,25 @@ class SpreadsheetGuard:
         ws = self.spreadsheet.worksheet(title)
         ws.update_cell(row, col, value)
 
+    def batch_update_cells(self, title: str, updates: list[tuple[int, int, str]]) -> None:
+        """Escreve varias celulas (possivelmente nao-contiguas, ex.: uma
+        Ronda inteira de domingos/quartas) numa UNICA chamada de API, em vez
+        de uma chamada por celula (`update_cell`). Pedido do Clayton
+        (2026-09-08) para economizar cota da API depois de bater em rate
+        limit (429) rodando Rondas em sequencia -- cada `update_cell` conta
+        como 1 requisicao de escrita; uma Ronda de 18 datas viravam 18
+        requisicoes, agora viram 1. Nao faz nada se `updates` estiver vazio
+        (algumas APIs de batch rejeitam payload vazio)."""
+        self._assert_is_claude_copy(title)
+        if not updates:
+            return
+        ws = self.spreadsheet.worksheet(title)
+        data = [
+            {"range": gspread.utils.rowcol_to_a1(row, col), "values": [[value]]}
+            for row, col, value in updates
+        ]
+        ws.batch_update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
+
     def append_row(self, title: str, values: list[str]) -> None:
         self._assert_is_claude_copy(title)
         ws = self.spreadsheet.worksheet(title)

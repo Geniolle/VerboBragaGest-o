@@ -24,6 +24,7 @@ class RegraColaborador:
     semana_alternada: bool
     alocacao_extra: int
     atribuir_aos_recados: bool
+    perfil_autorizacao: bool
     sinc_colaborador: str | None
     sinc_sem_alocacao: bool
     temas: list[str]

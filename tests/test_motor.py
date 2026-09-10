@@ -27,6 +27,7 @@ def _regra(nome: str, **overrides) -> RegraColaborador:
         semana_alternada=False,
         alocacao_extra=0,
         atribuir_aos_recados=False,
+        perfil_autorizacao=False,
         sinc_colaborador=None,
         sinc_sem_alocacao=False,
         temas=[],
@@ -37,12 +38,12 @@ def _regra(nome: str, **overrides) -> RegraColaborador:
     return RegraColaborador(**base)
 
 
-def _slot(row_index: int, d: date) -> SlotAgenda:
+def _slot(row_index: int, d: date, tema: str = "") -> SlotAgenda:
     return SlotAgenda(
         row_index=row_index,
         data=d,
         dia_da_semana="QUARTA-FEIRA",
-        tema="",
+        tema=tema,
         mes_key=f"{d.year:04d}-{d.month:02d}",
         semana_do_mes=week_of_month(d),
         is_ultima_ocorrencia_do_mes=False,
@@ -248,6 +249,89 @@ def test_descanso_cruzado_tambem_bloqueia_quando_o_compromisso_externo_e_no_futu
     )
 
     assert decisoes[0].vencedor == "Bia"
+
+
+def test_sub_rodizio_alterna_entre_membros_da_mesma_semana_preferencial():
+    # Pedido do Clayton (2026-09-10, apos ver Fernando Mauricio vencer sempre
+    # sobre Gislane Ferreira na unica vaga PLENO+"ultima semana" observada):
+    # "Temos de fazer um sub-rodizio para quem tem o SEMANA PREFERENCIAL,
+    # agrupamos quem tem igual, e uma vez de cada um." Isso ja esta
+    # implementado (`chave_rodizio_nivel`, 2a correcao de 2026-09-10) -- este
+    # teste prova que, havendo DUAS ocorrencias da mesma vaga (nivel PLENO +
+    # semana 5) na mesma janela, o rodizio de fato alterna: Fernando vence a
+    # 1a (prioridade melhor), fica bloqueado, Gislane vence a 2a.
+    fernando = _regra("Fernando", prioridade=8, semana_preferencial=5, temas=["P2"])
+    gislane = _regra("Gislane", prioridade=9, semana_preferencial=5, temas=["P2"])
+    regras = [fernando, gislane]
+    slots = [
+        _slot(1, date(2026, 8, 26)),  # ultima quarta de agosto/2026 (5a semana)
+        _slot(2, date(2026, 10, 28)),  # ultima quarta de outubro/2026 (5a semana)
+    ]
+    estado = EstadoExecucaoGrupo()
+    limites = {"Fernando": 100, "Gislane": 100}
+    requisitos = {1: "PLENO", 2: "PLENO"}
+
+    decisoes = alocar_grupo(regras, slots, estado, limites, requisitos_tema_por_slot=requisitos)
+
+    assert [d.vencedor for d in decisoes] == ["Fernando", "Gislane"]
+
+
+def test_rodizio_por_tema_favorece_quem_ainda_nao_fez_o_tema_mesmo_com_prioridade_pior():
+    # Pedido do Clayton (2026-09-10): "criar ronda por tema, e fazendo o
+    # rodizio, assim contemplamos todos" -- um bloco de tema com varias
+    # semanas seguidas do MESMO nivel (ex.: PLENO) nao garantia por si so
+    # que pessoas diferentes circulassem POR TEMA; so evitava repetir
+    # IMEDIATAMENTE (via rodizio geral do nivel). Aqui Ana (prioridade 1)
+    # ja venceu esse MESMO tema antes; Bia (prioridade 2) nunca fez. Mesmo
+    # sem nenhum bloqueio duro (janela de nivel nao entra em jogo pois nao
+    # ha requisito_tema aqui), o desempate deve favorecer Bia.
+    ana = _regra("Ana", prioridade=1)
+    bia = _regra("Bia", prioridade=2)
+    estado = EstadoExecucaoGrupo()
+    estado.historico_vencedores_por_tema["TEMA X"] = {"Ana": 2}
+    slot = _slot(1, date(2026, 1, 7), tema="Tema X")
+
+    decisoes = alocar_grupo([ana, bia], [slot], estado, {"Ana": 100, "Bia": 100})
+
+    assert decisoes[0].vencedor == "Bia"
+
+
+def test_rodizio_por_tema_nao_afeta_desempate_quando_ninguem_fez_o_tema_ainda():
+    # Contagem igual (0 para todos) -- desempate cai para o proximo
+    # criterio (prioridade), como antes desta mudanca.
+    ana = _regra("Ana", prioridade=1)
+    bia = _regra("Bia", prioridade=2)
+    estado = EstadoExecucaoGrupo()
+    slot = _slot(1, date(2026, 1, 7), tema="Tema X")
+
+    decisoes = alocar_grupo([ana, bia], [slot], estado, {"Ana": 100, "Bia": 100})
+
+    assert decisoes[0].vencedor == "Ana"
+
+
+def test_quebra_de_rodizio_fecha_gap_quando_unico_livre_do_rodizio_tem_outro_bloqueio():
+    # Pedido do Clayton (2026-09-10, motivado por um SEM ALOCAÇÃO real em
+    # FUNDAMENTOS DA FÉ): o rodizio de nivel bloqueou Ana (ultima vencedora
+    # PLENO), sobrando so Bia como "da vez" -- mas Bia esta de aniversario
+    # nesse dia. Sem a quebra de rodizio, ninguem sobra (SEM ALOCAÇÃO). Com
+    # a quebra (fallback so quando a passada normal falha), o rodizio e
+    # desligado, Ana volta a ficar elegivel e fecha a vaga; Bia continua de
+    # fora -- o bloqueio de aniversario dela NAO e quebrado, so o rodizio.
+    ana = _regra("Ana", prioridade=1, temas=["P2"])
+    bia = _regra("Bia", prioridade=2, temas=["P2"])
+    estado = EstadoExecucaoGrupo()
+    estado.historico_vencedores_por_nivel["PLENO"] = ["Ana"]
+    slot = _slot(1, date(2026, 1, 14))
+    aniversarios = {"BIA": date(2020, 1, 14)}
+
+    decisoes = alocar_grupo(
+        [ana, bia], [slot], estado, {"Ana": 100, "Bia": 100},
+        requisitos_tema_por_slot={1: "PLENO"},
+        aniversarios=aniversarios,
+    )
+
+    assert decisoes[0].vencedor == "Ana"
+    assert "RODÍZIO QUEBRADO" in decisoes[0].motivo
 
 
 def test_descanso_cruzado_fica_sem_alocacao_quando_e_o_unico_candidato():

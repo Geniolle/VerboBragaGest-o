@@ -82,6 +82,7 @@ def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColabor
                 semana_alternada=parse_bool(get(row, idx, ColBpAlgoritimo.SEMANA_ALTERNADA)),
                 alocacao_extra=parse_int(get(row, idx, ColBpAlgoritimo.ALOCACAO_EXTRA), default=0),
                 atribuir_aos_recados=parse_bool(get(row, idx, ColBpAlgoritimo.ATRIBUIR_AOS_RECADOS)),
+                perfil_autorizacao=parse_bool(get(row, idx, ColBpAlgoritimo.PERFIL_AUTORIZACAO)),
                 sinc_colaborador=sinc or None,
                 sinc_sem_alocacao=parse_bool(get(row, idx, ColBpAlgoritimo.SINC_SEM_ALOCACAO)),
                 temas=temas,

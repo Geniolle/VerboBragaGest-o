@@ -286,6 +286,62 @@ def nivel_senioridade(temas: list[str]) -> str:
     return NIVEL_JUNIOR
 
 
+def eh_fixo_sem_rodizio_de_nivel(regra: RegraColaborador) -> bool:
+    """True quando `regra` deve ficar TOTALMENTE fora do rodizio por nivel de
+    senioridade (QUARTA-FEIRA) -- nao conta para o tamanho da janela, nunca e
+    bloqueada por ela, e sua vitoria nao entra no historico.
+
+    CORRECAO 2026-09-10 original: ter SEMANA PREFERENCIAL preenchida
+    (`!= 0`) por si so ja tirava a pessoa do rodizio, sob a logica de que a
+    propria semana preferencial ja restringe suas datas possiveis. Isso
+    quebrou quando DUAS OU MAIS pessoas do mesmo NIVEL compartilham a MESMA
+    semana preferencial (ex.: Fernando Mauricio e Gislane Ferreira, ambos
+    PLENO + SEMANA PREFERENCIAL=5/ultima-semana): sem rodizio entre eles, o
+    desempate cai direto em PRIORIDADE (`chave_ordenacao_candidato`), entao o
+    de prioridade pior nunca vence, indefinidamente -- nao e falta de vaga
+    compativel, e falta de alternancia entre os proprios "fixos".
+
+    CORRECAO 2026-09-10 (pedido verbatim do Clayton, mesmo dia): a isencao de
+    rodizio agora exige tambem `PERFIL DE AUTORIZAÇÃO=true`, alem de
+    `SEMANA PREFERENCIAL != 0`. Quem tem semana preferencial cadastrada mas
+    NAO tem esse perfil continua sujeito ao filtro obrigatorio de semana
+    (`is_valid_preferred_week`, inalterado) -- so pode ser escalado na sua
+    semana -- mas agora participa de ALGUMA forma de rodizio (ver
+    `chave_rodizio_nivel` para os detalhes de qual)."""
+    return regra.semana_preferencial != 0 and regra.perfil_autorizacao
+
+
+def chave_rodizio_nivel(regra: RegraColaborador, nivel: str) -> str | None:
+    """Chave de agrupamento em `EstadoExecucaoGrupo.historico_vencedores_por_nivel`
+    usada pelo rodizio de QUARTA-FEIRA para `regra` dentro do nivel `nivel`
+    (que ja deve ser o nivel de senioridade REAL dela -- normalmente
+    `nivel_senioridade(regra.temas)`). None quando `regra` e totalmente isenta
+    (ver `eh_fixo_sem_rodizio_de_nivel`).
+
+    CORRECAO 2026-09-10 (2a do dia, apos simulacao contra dados reais revelar
+    um novo problema): a correcao anterior fez todo mundo com SEMANA
+    PREFERENCIAL preenchida e SEM `PERFIL DE AUTORIZAÇÃO` (ex.: Fernando
+    Mauricio e Gislane Ferreira, ambos PLENO + ultima-semana) entrar na MESMA
+    janela geral do nivel que os colaboradores totalmente flexiveis
+    (`semana_preferencial==0`). Isso infla o tamanho dessa janela (conta gente
+    que so pode ganhar numa fracao das vagas do nivel, ja que continuam
+    restritos pelo filtro obrigatorio de semana) sem adicionar capacidade
+    real -- confirmado numa simulacao real que isso podia bloquear
+    simultaneamente TODOS os candidatos de fato flexiveis, gerando
+    SEM ALOCAÇÃO onde antes nao havia nenhum.
+
+    Fix: quem tem `SEMANA PREFERENCIAL != 0` (e nao e isento) passa a
+    rodiziar numa SUB-JANELA PROPRIA, isolada da janela geral do nivel,
+    compartilhada apenas com quem tem o MESMO nivel E a MESMA semana
+    preferencial -- assim Fernando e Gislane alternam entre si (a unica vaga
+    que os dois disputam) sem afetar o denominador dos PLENOs flexiveis."""
+    if regra.semana_preferencial != 0 and regra.perfil_autorizacao:
+        return None
+    if regra.semana_preferencial != 0:
+        return f"{nivel}#SEM{regra.semana_preferencial}"
+    return nivel
+
+
 def is_tema_compativel(
     candidato_temas: list[str],
     requisito_real: str | None,
@@ -428,17 +484,28 @@ def esta_bloqueado_por_descanso_cruzado(
 def _requisitos_do_bloco_por_nivel(bloco: list, classificacao: str) -> dict[int, str]:
     """Distribui o NIVEL exigido (SENIOR/PLENO/JUNIOR) entre as semanas de
     um bloco de tema, segundo a hierarquia de senioridade pedida pelo
-    Clayton em 2026-09-08:
+    Clayton, corrigida em 2026-09-10 (a versao de 2026-09-08 pos P3 com 2
+    SENIOR -- pontas iguais ao P2 -- estava errada; o P3 e o tema mais facil
+    e so precisa de 1 SENIOR na abertura, nao um segundo na revisao):
 
       - Tema P1: toda semana do bloco exige SENIOR (so os mais experientes
         dao o tema mais dificil).
-      - Tema P2: a 1a e a ultima semana exigem SENIOR (abertura/revisao --
-        mesmo racional que ja existia so para P3 antes desta correcao); as
-        semanas do meio exigem PLENO.
-      - Tema P3: a 1a e a ultima semana exigem SENIOR; das semanas do meio,
-        pelo menos uma exige PLENO e o restante roda em ciclo PLENO/JUNIOR
-        (garante pelo menos 1 JUNIOR no bloco quando ha semanas de meio
-        suficientes).
+      - Tema P2: a 1a e a ultima semana exigem SENIOR (abertura/revisao);
+        as semanas do meio exigem PLENO. Ou seja, num bloco tipico de 4-5
+        semanas: 2 SENIOR e o restante PLENO.
+      - Tema P3: so a 1a semana exige SENIOR (abertura); a 2a semana exige
+        PLENO (fixo, nao rotativo); todas as demais exigem JUNIOR. Ou seja:
+        1 SENIOR, 1 PLENO e os demais JUNIOR.
+      - EXCECAO da 5a semana (2026-09-10, pedido do Clayton, motivada pelo
+        SEM ALOCAÇÃO real em "DOUTRINAS BÁSICAS DA BÍBLIA": bloco P3 de 5
+        semanas exigia 3 semanas JUNIOR no mesmo mes, mas so ha 2
+        colaboradores JUNIOR no grupo -- capacidade insuficiente por
+        desenho, nao um bug de rodizio): quando o bloco P3 tem EXATAMENTE 5
+        semanas, a 5a (ultima) semana exige PLENO em vez de JUNIOR --
+        "sempre dar preferencia a classificacao maior". Resultado num bloco
+        de 5 semanas: 1 SENIOR, 2 PLENO, 2 JUNIOR (em vez de 1 SENIOR, 1
+        PLENO, 3 JUNIOR). So altera n==5 -- blocos de 4 semanas continuam
+        1 SENIOR + 1 PLENO + 2 JUNIOR, sem mudanca.
 
     Dados reais (2026-09-08): todo bloco do ano tem 4 ou 5 semanas -- nunca
     menos --, mas o fallback abaixo cobre blocos anormalmente curtos (1 ou 2
@@ -457,22 +524,25 @@ def _requisitos_do_bloco_por_nivel(bloco: list, classificacao: str) -> dict[int,
         requisito[bloco[0].row_index] = NIVEL_SENIOR
         return requisito
 
-    # P2 e P3 (n >= 2): pontas exigem SENIOR.
-    requisito[bloco[0].row_index] = NIVEL_SENIOR
-    requisito[bloco[-1].row_index] = NIVEL_SENIOR
-    meio = bloco[1:-1]
-
     if classificacao == "P2":
-        for slot in meio:
+        # Pontas exigem SENIOR (abertura/revisao); meio exige PLENO.
+        requisito[bloco[0].row_index] = NIVEL_SENIOR
+        requisito[bloco[-1].row_index] = NIVEL_SENIOR
+        for slot in bloco[1:-1]:
             requisito[slot.row_index] = NIVEL_PLENO
         return requisito
 
-    # P3: meio roda em ciclo PLENO/JUNIOR (comecando por PLENO), garantindo
-    # pelo menos 1 PLENO e, quando meio tiver >= 2 semanas, pelo menos 1
-    # JUNIOR tambem.
-    ciclo = [NIVEL_PLENO, NIVEL_JUNIOR]
-    for i, slot in enumerate(meio):
-        requisito[slot.row_index] = ciclo[i % len(ciclo)]
+    # P3: 1a semana = SENIOR (abertura), 2a semana = PLENO (fixo), demais =
+    # JUNIOR. Com n == 2 nao ha "demais": fica so SENIOR + PLENO.
+    requisito[bloco[0].row_index] = NIVEL_SENIOR
+    requisito[bloco[1].row_index] = NIVEL_PLENO
+    for slot in bloco[2:]:
+        requisito[slot.row_index] = NIVEL_JUNIOR
+    if n == 5:
+        # Excecao da 5a semana (ver docstring): promove a ultima semana de
+        # JUNIOR para PLENO -- classificacao maior tem preferencia -- para
+        # nao exigir 3 semanas JUNIOR no mesmo bloco/mes.
+        requisito[bloco[-1].row_index] = NIVEL_PLENO
     return requisito
 
 
@@ -537,6 +607,12 @@ class ContextoDesempate:
     funcao_tem_restricao_ceia: bool
     slot_e_ceia: bool
     ultima_data_usada: dict[str, date] = field(default_factory=dict)
+    # Rodizio por TEMA (2026-09-10, pedido do Clayton: "criar ronda por
+    # tema... assim contemplamos todos"). {nome: quantas vezes ja venceu
+    # ESTE MESMO tema (texto exato do slot atual)} -- so populado em
+    # QUARTA-FEIRA (ver `_avaliar_e_escolher`); em qualquer outro dia fica
+    # vazio e o criterio de desempate abaixo vira neutro (0 para todos).
+    contagem_tema_atual: dict[str, int] = field(default_factory=dict)
 
 
 def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) -> tuple:
@@ -587,12 +663,22 @@ def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) ->
     semana_alternada_penalizada = r.semana_alternada and not respeita_descanso_minimo(
         ctx.ultima_data_usada.get(r.nome), ctx.slot.data
     )
+    # Rodizio por TEMA (2026-09-10, pedido do Clayton): entra ANTES de
+    # PRIORIDADE de proposito -- quem ainda nao fez este tema especifico
+    # passa a frente de quem ja fez, mesmo com prioridade pior. E um
+    # criterio de DESEMPATE (nunca desqualifica ninguem), ao contrario do
+    # rodizio geral por nivel (`historico_vencedores_por_nivel`, que
+    # bloqueia de verdade) -- escolha deliberada para nao repetir o mesmo
+    # tipo de regressao (SEM ALOCAÇÃO novo por janela fragmentada demais)
+    # ja visto ao introduzir a sub-janela de SEMANA PREFERENCIAL.
+    contagem_tema = ctx.contagem_tema_atual.get(r.nome, 0)
     prioridade = r.prioridade
 
     return (
         reserva_ceia_penalizada,
         rank_semana_preferencial,
         semana_alternada_penalizada,
+        contagem_tema,
         prioridade,
         # zumbi_vence,
         # historico,
@@ -646,6 +732,15 @@ class EstadoExecucaoGrupo:
     # fechadas (acontece automaticamente, ja que o replay chama
     # `alocar_grupo` normalmente sobre os slots historicos).
     historico_vencedores_por_nivel: dict[str, list[str]] = field(default_factory=dict)
+    # Rodizio por TEMA (2026-09-10, pedido do Clayton: um bloco de tema com
+    # varias semanas do MESMO nivel no meio -- ex.: "VIDA DE PROSPERIDADE"
+    # com 3 semanas de PLENO seguidas -- nao garantia por si so que pessoas
+    # DIFERENTES circulassem POR TEMA ao longo do ano; so o rodizio geral do
+    # nivel (que mistura todos os temas) evitava repeticao imediata).
+    # {tema (texto normalizado): {nome: quantas vezes ja venceu ESTE tema}}
+    # -- usado como CRITERIO DE DESEMPATE (nao filtro obrigatorio, ver
+    # `chave_ordenacao_candidato`), entao nunca gera SEM ALOCAÇÃO novo.
+    historico_vencedores_por_tema: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def avaliar_candidatos_para_slot(
@@ -662,8 +757,17 @@ def avaliar_candidatos_para_slot(
     vizinhos_de_data: tuple[int | None, int | None] = (None, None),
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
+    ignorar_rodizio_nivel: bool = False,
 ) -> tuple[list[CandidatoRuntime], list[CandidatoRuntime]]:
-    """Devolve (validos, violadores_de_semana_alternada_mas_ainda_elegiveis)."""
+    """Devolve (validos, violadores_de_semana_alternada_mas_ainda_elegiveis).
+
+    `ignorar_rodizio_nivel` (2026-09-10, pedido do Clayton): usado por
+    `_avaliar_e_escolher` numa passada intermediaria entre a normal e o
+    RESGATE, para "quebrar" APENAS o rodizio completo por NIVEL quando ele
+    e o unico motivo do SEM ALOCAÇÃO -- ver docstring de `_avaliar_e_
+    escolher` para o cenario completo. Todo o resto da cascata (cota,
+    Excluse, aniversario, descanso cruzado, tema, semana preferencial,
+    vizinhanca, descanso minimo) continua sendo aplicado normalmente."""
     validos: list[CandidatoRuntime] = []
     violadores_sem_alt: list[CandidatoRuntime] = []
 
@@ -684,19 +788,37 @@ def avaliar_candidatos_para_slot(
     # Clayton -- mesmo mecanismo da CEIA acima, mas por SENIOR/PLENO/JUNIOR
     # em QUARTA-FEIRA): so entra em jogo quando o slot tem um nivel exigido
     # (`requisito_tema`, ja traduzido em SENIOR/PLENO/JUNIOR por
-    # `montar_requisito_tema_por_slot`). Janela = tamanho do NIVEL exigido
-    # entre os candidatos do grupo, menos 1. So bloqueia no RESGATE=False
-    # (passada normal); o resgate ja ignora tema por completo, entao nao ha
-    # nivel pra rodiziar ali.
-    recentes_nivel_bloqueados: set[str] = set()
+    # `montar_requisito_tema_por_slot`). So bloqueia no RESGATE=False (passada
+    # normal); o resgate ja ignora tema por completo, entao nao ha nivel pra
+    # rodiziar ali.
+    #
+    # Quem e "fixo" (ver `eh_fixo_sem_rodizio_de_nivel`) fica totalmente fora.
+    # Os demais rodiziam dentro da SUA PROPRIA chave (`chave_rodizio_nivel`):
+    # flexiveis (semana_preferencial==0) competem na janela geral do nivel;
+    # quem tem semana preferencial mas nao e isento compete numa sub-janela
+    # isolada, so com quem compartilha a MESMA semana dentro do mesmo nivel
+    # -- ver a docstring de `chave_rodizio_nivel` para o porque (2a correcao
+    # de 2026-09-10, motivada por uma simulacao real que expos um SEM
+    # ALOCAÇÃO novo quando as duas populacoes dividiam a mesma janela).
+    recentes_nivel_bloqueados: dict[str, set[str]] = {}
     if not ignorar_vizinhanca_e_descanso and requisito_tema and "QUARTA" in slot.dia_da_semana.upper():
         nivel_alvo = requisito_tema.upper()
-        tamanho_nivel = len({c.nome for c in candidatos if nivel_senioridade(c.temas) == nivel_alvo})
-        janela_nivel = max(0, tamanho_nivel - 1)
-        if janela_nivel > 0:
-            recentes_nivel_bloqueados = set(
-                estado.historico_vencedores_por_nivel.get(nivel_alvo, [])[-janela_nivel:]
-            )
+        chaves_do_nivel = {
+            chave_rodizio_nivel(c, nivel_alvo)
+            for c in candidatos
+            if nivel_senioridade(c.temas) == nivel_alvo
+        }
+        chaves_do_nivel.discard(None)
+        for chave in chaves_do_nivel:
+            tamanho_bucket = len({
+                c.nome for c in candidatos
+                if nivel_senioridade(c.temas) == nivel_alvo and chave_rodizio_nivel(c, nivel_alvo) == chave
+            })
+            janela_bucket = max(0, tamanho_bucket - 1)
+            if janela_bucket > 0:
+                recentes_nivel_bloqueados[chave] = set(
+                    estado.historico_vencedores_por_nivel.get(chave, [])[-janela_bucket:]
+                )
 
     for regra in candidatos:
         if slot.semana_do_mes == 1 and "DOMINGO" in slot.dia_da_semana.upper():
@@ -773,8 +895,10 @@ def avaliar_candidatos_para_slot(
             continue
         if not is_tema_compativel(regra.temas, requisito_tema, regra.dia_da_semana):
             continue
-        if regra.nome in recentes_nivel_bloqueados:
-            continue
+        if requisito_tema and not ignorar_rodizio_nivel:
+            chave_regra = chave_rodizio_nivel(regra, requisito_tema.upper())
+            if chave_regra is not None and regra.nome in recentes_nivel_bloqueados.get(chave_regra, set()):
+                continue
         # SEMANA PREFERENCIAL como filtro obrigatorio (2026-09-08, pedido do
         # Clayton): quem cadastra uma preferencia so pode ser alocado
         # naquela semana -- em qualquer outra semana ele fica INELEGIVEL na
@@ -836,13 +960,34 @@ def _avaliar_e_escolher(
     vizinhos_de_data: tuple[int | None, int | None] = (None, None),
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
-) -> tuple[CandidatoRuntime | None, list[str], bool]:
-    """Roda a cascata de filtros (+ resgate, se necessario) e o desempate
-    sobre `pool`. Devolve (vencedor_ou_None, nomes_ordenados, usou_resgate).
+) -> tuple[CandidatoRuntime | None, list[str], bool, bool]:
+    """Roda a cascata de filtros (+ quebra de rodizio de nivel e/ou resgate,
+    se necessario) e o desempate sobre `pool`. Devolve (vencedor_ou_None,
+    nomes_ordenados, usou_resgate, usou_quebra_rodizio).
     `decisoes_por_row`/`vizinhos_de_data` habilitam o filtro obrigatorio de
     "vizinhanca de datas" (ver `viola_vizinhanca_de_datas`); sem eles, o
     filtro simplesmente nao e aplicado (retrocompativel com chamadas que nao
-    rastreiam decisoes por linha)."""
+    rastreiam decisoes por linha).
+
+    QUEBRA DE RODIZIO (2026-09-10, pedido do Clayton, motivada por um SEM
+    ALOCAÇÃO real em FUNDAMENTOS DA FÉ: rodizio de nivel bloqueou os 6
+    PLENOs ja usados recentemente, e o unico "da vez" fora da janela estava
+    de aniversario nesse dia -- ninguem sobrou): "quando nao houver alocacao
+    pelo motivo do rodizio, buscar o primeiro da hierarquia, mas somente
+    para fechar o gap, respeitando os [outros] bloqueios -- se necessario
+    por outro bloqueio, buscar o proximo na hierarquia". Ou seja: se a
+    passada normal (COM rodizio de nivel) nao acha ninguem, tenta uma 2a
+    passada identica mas com o rodizio de nivel desligado (`ignorar_rodizio_
+    nivel=True`) -- todo o resto da cascata continua valendo (cota, Excluse,
+    aniversario, descanso cruzado, tema, semana preferencial, vizinhanca,
+    descanso minimo). O desempate normal (`ordenar_candidatos`) ja ordena
+    por hierarquia/prioridade, entao o vencedor dessa passada e sempre "o
+    primeiro da hierarquia" entre quem sobrou -- se o 1o da hierarquia
+    tambem estiver bloqueado por outro motivo (aniversario, Excluse etc.),
+    ele nem aparece em `validos` e o desempate automaticamente cai pro
+    proximo. So se essa 2a passada tambem vier vazia (bloqueio por outro
+    motivo em TODO MUNDO, nao so rodizio) e que o RESGATE tradicional (3a
+    passada, ultimo recurso) entra em jogo."""
     validos, _ = avaliar_candidatos_para_slot(
         pool, slot, estado, mapa_limites_locais, requisito_tema,
         ignorar_vizinhanca_e_descanso=False,
@@ -853,6 +998,19 @@ def _avaliar_e_escolher(
     )
 
     usou_resgate = False
+    usou_quebra_rodizio = False
+    if not validos:
+        validos, _ = avaliar_candidatos_para_slot(
+            pool, slot, estado, mapa_limites_locais, requisito_tema,
+            ignorar_vizinhanca_e_descanso=False,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=mapa_limites_mensais,
+            decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+            aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            ignorar_rodizio_nivel=True,
+        )
+        usou_quebra_rodizio = bool(validos)
+
     if not validos:
         usou_resgate = True
         validos, _ = avaliar_candidatos_para_slot(
@@ -865,7 +1023,7 @@ def _avaliar_e_escolher(
         )
 
     if not validos:
-        return None, [], usou_resgate
+        return None, [], usou_resgate, usou_quebra_rodizio
 
     ctx = ContextoDesempate(
         slot=slot,
@@ -879,9 +1037,14 @@ def _avaliar_e_escolher(
         ultima_data_usada=estado.ultima_data_usada,
         funcao_tem_restricao_ceia=funcao_tem_restricao_ceia,
         slot_e_ceia=slot.row_index in slots_ceia,
+        contagem_tema_atual=(
+            estado.historico_vencedores_por_tema.get(slot.tema.strip().upper(), {})
+            if "QUARTA" in slot.dia_da_semana.upper() and slot.tema
+            else {}
+        ),
     )
     ordenados = ordenar_candidatos(validos, ctx)
-    return ordenados[0], [c.nome for c in ordenados], usou_resgate
+    return ordenados[0], [c.nome for c in ordenados], usou_resgate, usou_quebra_rodizio
 
 
 def _registrar_vencedor(
@@ -905,8 +1068,23 @@ def _registrar_vencedor(
         # correspondencia exata); no resgate podem divergir, e ainda assim
         # o registro fica correto para o rodizio futuro dentro do proprio
         # nivel do vencedor.
+        # Quem e "fixo" (ver `eh_fixo_sem_rodizio_de_nivel`) fica de fora
+        # deste historico -- sua vitoria nunca deve ocupar uma posicao em
+        # nenhuma janela. Os demais registram sob a MESMA chave usada para
+        # bloquea-los (`chave_rodizio_nivel`) -- janela geral do nivel para
+        # flexiveis, sub-janela isolada por semana para quem tem semana
+        # preferencial mas nao e isento.
         nivel = nivel_senioridade(vencedor.regra.temas)
-        estado.historico_vencedores_por_nivel.setdefault(nivel, []).append(nome)
+        chave = chave_rodizio_nivel(vencedor.regra, nivel)
+        if chave is not None:
+            estado.historico_vencedores_por_nivel.setdefault(chave, []).append(nome)
+        # Rodizio por TEMA (2026-09-10): registra sob o texto exato do tema
+        # do slot, independente do nivel/chave acima -- ver docstring do
+        # campo em `EstadoExecucaoGrupo`.
+        if slot.tema:
+            tema_norm = slot.tema.strip().upper()
+            contagem = estado.historico_vencedores_por_tema.setdefault(tema_norm, {})
+            contagem[nome] = contagem.get(nome, 0) + 1
 
 
 def _desregistrar_vencedor(estado: EstadoExecucaoGrupo, nome: str, slot: SlotAgenda) -> None:
@@ -933,6 +1111,12 @@ def _desregistrar_vencedor(estado: EstadoExecucaoGrupo, nome: str, slot: SlotAge
         if lista_nivel and lista_nivel[-1] == nome:
             lista_nivel.pop()
             break
+    if slot.tema:
+        contagem = estado.historico_vencedores_por_tema.get(slot.tema.strip().upper())
+        if contagem and contagem.get(nome):
+            contagem[nome] -= 1
+            if contagem[nome] == 0:
+                del contagem[nome]
 
 
 def _tentar_reorganizar_lacuna(
@@ -1017,10 +1201,16 @@ def _tentar_reorganizar_lacuna(
     return None, None, None
 
 
-def _motivo_normal(vencedor: CandidatoRuntime, usou_resgate: bool) -> str:
+def _motivo_normal(
+    vencedor: CandidatoRuntime, usou_resgate: bool, usou_quebra_rodizio: bool = False
+) -> str:
     if vencedor.is_sinc_forced or vencedor.is_sinc_natural:
         return "SINCRONIZAÇÃO"
-    return "RESGATE" if usou_resgate else "ALOCAÇÃO NORMAL"
+    if usou_resgate:
+        return "RESGATE"
+    if usou_quebra_rodizio:
+        return "ALOCAÇÃO NORMAL (RODÍZIO QUEBRADO P/ FECHAR LACUNA)"
+    return "ALOCAÇÃO NORMAL"
 
 
 def alocar_grupo(
@@ -1058,7 +1248,7 @@ def alocar_grupo(
     decisoes: list[DecisaoAlocacao] = []
     for slot in slots_ordenados:
         requisito_tema = requisitos_tema_por_slot.get(slot.row_index)
-        vencedor, ordenados_nomes, usou_resgate = _avaliar_e_escolher(
+        vencedor, ordenados_nomes, usou_resgate, usou_quebra_rodizio = _avaliar_e_escolher(
             regras_grupo, slot, estado, mapa_limites_locais, requisito_tema,
             funcao_tem_restricao_ceia, slots_ceia, excluse_header, excluse_rows,
             mapa_limites_mensais,
@@ -1073,7 +1263,7 @@ def alocar_grupo(
             decisoes.append(decisao)
             continue
 
-        motivo = _motivo_normal(vencedor, usou_resgate)
+        motivo = _motivo_normal(vencedor, usou_resgate, usou_quebra_rodizio)
         _registrar_vencedor(estado, vencedor, slot)
         decisao = DecisaoAlocacao(
             slot=slot,
@@ -1136,7 +1326,7 @@ def _alocar_grupo_domingo_ceia_alternada(
     vencedores_ceia_sem_atm: set[str] = set()
     for slot in slots_ceia_1o_domingo:
         requisito_tema = requisitos_tema_por_slot.get(slot.row_index)
-        vencedor, ordenados_nomes, usou_resgate = _avaliar_e_escolher(
+        vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
             regras_grupo, slot, estado, mapa_limites_locais, requisito_tema,
             funcao_tem_restricao_ceia, slots_ceia, excluse_header, excluse_rows,
             mapa_limites_mensais,
@@ -1172,7 +1362,7 @@ def _alocar_grupo_domingo_ceia_alternada(
     for slot in slots_normais:
         requisito_tema = requisitos_tema_por_slot.get(slot.row_index)
         candidatos_disponiveis = [r for r in pool_fase3 if r.nome in nomes_disponiveis_fase3]
-        vencedor, ordenados_nomes, usou_resgate = _avaliar_e_escolher(
+        vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
             candidatos_disponiveis, slot, estado, mapa_limites_locais, requisito_tema,
             funcao_tem_restricao_ceia, slots_ceia, excluse_header, excluse_rows,
             mapa_limites_mensais,
@@ -1223,7 +1413,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             r for r in hierarquia_gap_fill if r.nome not in recentes_lacuna_bloqueados
         ]
         vizinhos_do_slot = vizinhos_de_data_por_row.get(slot.row_index, (None, None))
-        vencedor, ordenados_nomes, usou_resgate = _avaliar_e_escolher(
+        vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
             pool_ainda_nao_usado, slot, estado, limites_sem_teto, requisito_tema,
             funcao_tem_restricao_ceia, slots_ceia, excluse_header, excluse_rows,
             mapa_limites_mensais=None,
@@ -1232,7 +1422,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             compromissos_cruzados=compromissos_cruzados,
         )
         if vencedor is None:
-            vencedor, ordenados_nomes, usou_resgate = _avaliar_e_escolher(
+            vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
                 hierarquia_gap_fill, slot, estado, limites_sem_teto, requisito_tema,
                 funcao_tem_restricao_ceia, slots_ceia, excluse_header, excluse_rows,
                 mapa_limites_mensais=None,

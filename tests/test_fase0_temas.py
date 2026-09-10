@@ -62,7 +62,7 @@ def test_bloco_p2_com_varias_semanas_pontas_senior_meio_pleno():
     assert requisito[4] == "SENIOR"
 
 
-def test_bloco_p3_com_varias_semanas_pontas_senior_meio_pleno_e_junior():
+def test_bloco_p3_so_abertura_senior_2a_semana_pleno_e_o_restante_junior():
     slots = [
         _slot(1, date(2026, 1, 7), "ALIANÇA DE SANGUE"),
         _slot(2, date(2026, 1, 14), "ALIANÇA DE SANGUE"),
@@ -73,10 +73,37 @@ def test_bloco_p3_com_varias_semanas_pontas_senior_meio_pleno_e_junior():
 
     requisito = montar_requisito_tema_por_slot(slots, temas)
 
+    # Correcao 2026-09-10 (pedido do Clayton): P3 e o tema mais facil, so
+    # precisa de 1 SENIOR (abertura) -- nao 2 como o P2 -- seguido de 1
+    # PLENO fixo na 2a semana e JUNIOR no restante do bloco.
     assert requisito[1] == "SENIOR"
     assert requisito[2] == "PLENO"
     assert requisito[3] == "JUNIOR"
-    assert requisito[4] == "SENIOR"
+    assert requisito[4] == "JUNIOR"
+
+
+def test_bloco_p3_com_5_semanas_promove_a_ultima_de_junior_para_pleno():
+    slots = [
+        _slot(1, date(2026, 1, 7), "DOUTRINAS BÁSICAS DA BÍBLIA"),
+        _slot(2, date(2026, 1, 14), "DOUTRINAS BÁSICAS DA BÍBLIA"),
+        _slot(3, date(2026, 1, 21), "DOUTRINAS BÁSICAS DA BÍBLIA"),
+        _slot(4, date(2026, 1, 28), "DOUTRINAS BÁSICAS DA BÍBLIA"),
+        _slot(5, date(2026, 2, 4), "DOUTRINAS BÁSICAS DA BÍBLIA"),
+    ]
+    temas = [TemaClassificado("QUARTA-FEIRA", "DOUTRINAS BÁSICAS DA BÍBLIA", "P3")]
+
+    requisito = montar_requisito_tema_por_slot(slots, temas)
+
+    # Excecao da 5a semana (2026-09-10, pedido do Clayton): bloco P3 de 5
+    # semanas so tem capacidade para 2 semanas JUNIOR no grupo real (2
+    # colaboradores JUNIOR, cota de 1/mes cada) -- a 5a semana promove para
+    # PLENO ("sempre dar preferencia a classificacao maior") em vez dos 3
+    # JUNIOR que geravam SEM ALOCAÇÃO.
+    assert requisito[1] == "SENIOR"
+    assert requisito[2] == "PLENO"
+    assert requisito[3] == "JUNIOR"
+    assert requisito[4] == "JUNIOR"
+    assert requisito[5] == "PLENO"
 
 
 def test_bloco_de_semana_unica_exige_senior_como_fallback_seguro():

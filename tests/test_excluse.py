@@ -65,6 +65,7 @@ def _regra(nome: str, **overrides) -> RegraColaborador:
         semana_alternada=False,
         alocacao_extra=0,
         atribuir_aos_recados=False,
+        perfil_autorizacao=False,
         sinc_colaborador=None,
         sinc_sem_alocacao=False,
         temas=[],

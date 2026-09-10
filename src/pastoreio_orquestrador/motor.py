@@ -837,9 +837,19 @@ def avaliar_candidatos_para_slot(
             # recurso para nao deixar a vaga vazia, mas restrito a quem esta
             # explicitamente disponivel para isso -- ALOCAR TODOS OS
             # MESES=false E ALOCAÇÃO EXTRA=true. Dentro desse pool restrito,
-            # os UNICOS filtros aplicados sao Excluse e conflito de
-            # vizinhanca; cota mensal, descanso minimo, tema e semana
-            # preferencial nao bloqueiam no resgate.
+            # os filtros aplicados sao Excluse, aniversario, descanso minimo
+            # CRUZADO e conflito de vizinhanca; cota mensal, descanso minimo
+            # (mesma funcao/mesmo dia da semana), tema e semana preferencial
+            # continuam sem bloquear no resgate.
+            #
+            # Correcao 2026-09-10 (pedido do Clayton, caso real: Andre Luiz
+            # foi RESGATE no domingo 23/05/2027, so 4 dias depois de ja ter
+            # sido MINISTRO na quarta-feira 19/05/2027): o descanso minimo
+            # cruzado (`esta_bloqueado_por_descanso_cruzado`, criado em
+            # 2026-09-08) nunca tinha sido incluido aqui porque o RESGATE e
+            # mais antigo -- o resultado era que o "ultimo recurso" furava
+            # justamente a regra desenhada para evitar a mesma pessoa como
+            # MINISTRO num domingo e numa quarta-feira proximos.
             if regra.alocar_todos_os_meses or not regra.alocacao_extra:
                 continue
             if excluse_header is not None and excluse_rows is not None:
@@ -848,6 +858,10 @@ def avaliar_candidatos_para_slot(
                 ):
                     continue
             if aniversarios and esta_bloqueado_por_aniversario(regra.nome, slot, aniversarios):
+                continue
+            if compromissos_cruzados and esta_bloqueado_por_descanso_cruzado(
+                regra.nome, slot.data, compromissos_cruzados
+            ):
                 continue
             if has_neighbor_conflict(regra.nome, vizinhos):
                 continue

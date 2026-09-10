@@ -251,6 +251,33 @@ def test_descanso_cruzado_tambem_bloqueia_quando_o_compromisso_externo_e_no_futu
     assert decisoes[0].vencedor == "Bia"
 
 
+def test_resgate_tambem_respeita_descanso_cruzado():
+    # Caso real (2026-09-10, achado pelo Clayton): Andre Luiz foi RESGATE no
+    # domingo 23/05/2027, so 4 dias depois de ja ter sido MINISTRO na
+    # quarta-feira 19/05/2027 -- o descanso minimo cruzado (criado em
+    # 2026-09-08) nunca tinha sido incluido no RESGATE (que e mais antigo,
+    # de 2026-09-07), entao o "ultimo recurso" furava justamente a regra
+    # feita para evitar essa repeticao entre domingo e quarta.
+    #
+    # Aqui: Ana (unica com ALOCAR TODOS OS MESES=false + ALOCAÇÃO EXTRA=true,
+    # ou seja, elegivel para RESGATE) ja tem um compromisso confirmado 4 dias
+    # antes do slot -- mesmo com a cota esgotada forçando o RESGATE, ela deve
+    # continuar bloqueada e a vaga deve ficar SEM ALOCAÇÃO (nao ha mais
+    # ninguem elegivel para o resgate neste cenario).
+    regras = [_regra("Ana", repeticao_mensal=1, alocacao_extra=1)]
+    slots = [_slot(1, date(2026, 1, 14))]  # quarta-feira
+    estado = EstadoExecucaoGrupo()
+    limites = {"Ana": 0}  # cota ja esgotada, forca a cascata a cair no RESGATE
+    compromissos_cruzados = {"ANA": [date(2026, 1, 10)]}  # domingo, 4 dias antes
+
+    decisoes = alocar_grupo(
+        regras, slots, estado, limites, compromissos_cruzados=compromissos_cruzados
+    )
+
+    assert decisoes[0].vencedor is None
+    assert decisoes[0].sem_alocacao is True
+
+
 def test_sub_rodizio_alterna_entre_membros_da_mesma_semana_preferencial():
     # Pedido do Clayton (2026-09-10, apos ver Fernando Mauricio vencer sempre
     # sobre Gislane Ferreira na unica vaga PLENO+"ultima semana" observada):

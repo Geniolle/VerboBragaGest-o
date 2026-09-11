@@ -43,11 +43,56 @@ def get(row: list[str], idx: dict[str, int], nome_coluna: str, default: str = ""
     return row[i]
 
 
+# Colunas de BP ALGORITIMO sem as quais uma regra nao pode ser avaliada
+# corretamente -- se QUALQUER uma faltar no cabecalho, `get()` devolveria o
+# valor default silenciosamente (ex.: prioridade=999 para todo mundo) em vez
+# de falhar de forma visivel.
+#
+# Adicionado 2026-09-11 (pedido do Clayton, investigacao do grupo novo
+# D. MINISTROS/CEIA): o cabecalho de "CLAUDE_BP ALGORITIMO" ficou com a
+# coluna G em branco (deveria ser "PRIORIDADE NA ALOCAÇÃO") depois de
+# "SEMANA PREFERENCIAL" ter sido reposicionada em 2026-09-08 sem atualizar o
+# texto do cabecalho -- `idx.get("PRIORIDADE NA ALOCAÇÃO")` devolvia `None`
+# e TODO MUNDO, em TODOS os grupos, era carregado com prioridade=999 sem
+# nenhum aviso. So nao tinha quebrado nenhum resultado ate entao porque a
+# ordem das linhas na sheet coincidia, por acaso, com a ordem de prioridade
+# pretendida (o desempate por ordem de insercao mascarava o problema). Esta
+# checagem torna esse tipo de corrupcao de cabecalho um erro alto e claro,
+# em vez de um defeito silencioso.
+COLUNAS_OBRIGATORIAS_BP_ALGORITIMO = (
+    ColBpAlgoritimo.NOME,
+    ColBpAlgoritimo.DEPARTAMENTO,
+    ColBpAlgoritimo.FUNCAO,
+    ColBpAlgoritimo.DIA_DA_SEMANA,
+    ColBpAlgoritimo.PRIORIDADE,
+    ColBpAlgoritimo.REPETICAO_MENSAL,
+    ColBpAlgoritimo.ALOCAR_TODOS_OS_MESES,
+    ColBpAlgoritimo.SEMANA_PREFERENCIAL,
+    ColBpAlgoritimo.CEIA_ALTERNADA,
+    ColBpAlgoritimo.SEMANA_ALTERNADA,
+    ColBpAlgoritimo.ALOCACAO_EXTRA,
+    ColBpAlgoritimo.ATIVO,
+)
+
+
+def validar_cabecalho_bp_algoritimo(idx: dict[str, int]) -> list[str]:
+    """Devolve os nomes de coluna obrigatorios que nao existem no
+    cabecalho (idx construido por `build_header_index`)."""
+    return [nome for nome in COLUNAS_OBRIGATORIAS_BP_ALGORITIMO if nome not in idx]
+
+
 def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColaborador]:
     """Le BP ALGORITIMO e devolve apenas as regras com ATIVO=true."""
     if not valores:
         return []
     idx = build_header_index(valores[0])
+    faltando = validar_cabecalho_bp_algoritimo(idx)
+    if faltando:
+        raise ValueError(
+            "Cabecalho de BP ALGORITIMO sem coluna(s) obrigatoria(s): "
+            + ", ".join(repr(n) for n in faltando)
+            + ". Provavel corrupcao/reposicionamento de coluna sem atualizar o cabecalho."
+        )
     regras: list[RegraColaborador] = []
 
     for row_i, row in enumerate(valores[1:], start=1):

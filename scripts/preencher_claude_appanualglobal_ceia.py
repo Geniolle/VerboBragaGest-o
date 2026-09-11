@@ -28,6 +28,12 @@ quarta-feira e domingo): esse conceito e especifico da FUNÇÃO="MINISTRO"
 (mesma pessoa pregando duas vezes em poucos dias); CEIA nao tem par de
 quarta-feira, entao a checagem nao se aplica aqui.
 
+Email automatico (pedido do Clayton, 2026-09-11): sempre que um nome e
+escrito na coluna CEIA, o email correspondente (aba "BP SERVICE", coluna
+EMAIL, casado por NOME) e escrito junto na coluna "EMAIL CEIA" -- o padrao
+e sempre "EMAIL <nome da coluna de alocacao>". Nomes sem email cadastrado
+(ex.: placeholders) ficam com a celula de email em branco, sem erro.
+
 Escreve exclusivamente na copia CLAUDE_AppAnualGlobal (guard bloqueia
 qualquer tentativa em aba sem o prefixo).
 """
@@ -37,7 +43,7 @@ from datetime import date
 
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
-    carregar_excluse_matriz, carregar_regras_colaboradores,
+    carregar_emails, carregar_excluse_matriz, carregar_regras_colaboradores,
     carregar_zumbis_prioritarios, extrair_assiduidade_da_linha,
     extrair_papeis_da_linha, get,
 )
@@ -83,9 +89,13 @@ def main() -> None:
     bp_log_raw = guard.read_worksheet("BP LOG")
     bp_service_raw = guard.read_worksheet("BP SERVICE")
     aniversarios = carregar_aniversarios(bp_service_raw)
+    # Email automatico (pedido do Clayton, 2026-09-11): quem for escrito em
+    # CEIA tem o email escrito em "EMAIL CEIA", casado por NOME em BP SERVICE.
+    emails = carregar_emails(bp_service_raw)
 
     idx = build_header_index(agenda_raw[0])
     col_ceia = idx[COL_NOME]
+    col_email = idx["EMAIL " + COL_NOME]
 
     regras = carregar_regras_colaboradores(regras_raw)
     nomes_vistos: set[str] = set()
@@ -182,15 +192,19 @@ def main() -> None:
         linha_sheet = d.slot.row_index + 1  # +1: header ocupa a linha 1
         if d.vencedor is None:
             updates.append((linha_sheet, col_ceia + 1, "SEM ALOCAÇÃO"))
+            updates.append((linha_sheet, col_email + 1, ""))
             print(f"  {d.slot.data} -> SEM ALOCAÇÃO (linha {linha_sheet})")
             continue
+        email = emails.get(d.vencedor.strip().upper(), "")
         updates.append((linha_sheet, col_ceia + 1, d.vencedor))
-        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet})")
+        updates.append((linha_sheet, col_email + 1, email))
+        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet}) "
+              f"[EMAIL CEIA={email or '(sem email cadastrado)'}]")
 
     guard.batch_update_cells(AGENDA_TITLE, updates)
 
-    print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Apenas a coluna"
-          " CEIA foi escrita.")
+    print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Colunas"
+          " CEIA e EMAIL CEIA foram escritas.")
 
 
 if __name__ == "__main__":

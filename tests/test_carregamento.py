@@ -8,7 +8,7 @@ mundo."""
 import pytest
 
 from pastoreio_orquestrador.carregamento import (
-    build_header_index, carregar_regras_colaboradores,
+    build_header_index, carregar_emails, carregar_regras_colaboradores,
     validar_cabecalho_bp_algoritimo,
 )
 
@@ -52,3 +52,32 @@ def test_validar_cabecalho_lista_todas_as_colunas_faltando():
     assert "PRIORIDADE NA ALOCAÇÃO" in faltando
     assert "ATIVO" in faltando
     assert "NOME" not in faltando
+
+
+# ---------------------------------------------------------------------------
+# carregar_emails (pedido do Clayton, 2026-09-11: escrever automaticamente
+# o email do colaborador alocado na coluna "EMAIL <FUNÇÃO>")
+# ---------------------------------------------------------------------------
+
+CABECALHO_BP_SERVICE = ["ID_USER", "NOME", "TELEFONE", "WHATSAPP", "NUMBER_WHATSAPP", "EMAIL"]
+
+
+def test_carregar_emails_casa_por_nome_em_maiusculas():
+    valores = [
+        CABECALHO_BP_SERVICE,
+        ["1", "André Luiz", "", "", "", "andre@example.com"],
+    ]
+    emails = carregar_emails(valores)
+    assert emails["ANDRÉ LUIZ"] == "andre@example.com"
+
+
+def test_carregar_emails_ignora_linha_sem_email():
+    """Caso real: 'Culto de Oração' e um placeholder (nao uma pessoa) e nao
+    tem linha/email cadastrado em BP SERVICE -- nao deve gerar entrada nem
+    erro, so fica de fora do dicionario (o chamador escreve celula vazia)."""
+    valores = [
+        CABECALHO_BP_SERVICE,
+        ["1", "Culto de Oração", "", "", "", ""],
+    ]
+    emails = carregar_emails(valores)
+    assert "CULTO DE ORAÇÃO" not in emails

@@ -36,6 +36,13 @@ libera qualquer dia da semana que nao seja QUARTA-FEIRA), so nao fazia
 sentido continuar carregando e calculando algo que nunca e usado aqui. A
 logica de tema completa (coluna certa "TEMA", nao "TEMA DA MINISTRAÇÃO")
 agora vive so em `preencher_claude_appanualglobal_quarta.py`.
+
+Email automatico (pedido do Clayton, 2026-09-11): sempre que um nome e
+escrito na coluna MINISTRO, o email correspondente (aba "BP SERVICE",
+coluna EMAIL, casado por NOME) e escrito junto na coluna "EMAIL MINISTRO"
+-- o padrao e sempre "EMAIL <nome da coluna de alocacao>". Nomes sem email
+cadastrado (ex.: placeholders como "Culto de Oração") ficam com a celula de
+email em branco, sem erro.
 """
 from __future__ import annotations
 
@@ -43,7 +50,7 @@ from datetime import date
 
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
-    carregar_compromissos_cruzados, carregar_excluse_matriz,
+    carregar_compromissos_cruzados, carregar_emails, carregar_excluse_matriz,
     carregar_regras_colaboradores, carregar_zumbis_prioritarios,
     extrair_assiduidade_da_linha, extrair_papeis_da_linha, get,
 )
@@ -91,6 +98,10 @@ def main() -> None:
     bp_log_raw = guard.read_worksheet("BP LOG")
     bp_service_raw = guard.read_worksheet("BP SERVICE")
     aniversarios = carregar_aniversarios(bp_service_raw)
+    # Email automatico (pedido do Clayton, 2026-09-11): quem for escrito em
+    # MINISTRO tem o email escrito em "EMAIL MINISTRO", casado por NOME em
+    # BP SERVICE.
+    emails = carregar_emails(bp_service_raw)
     # Descanso minimo cruzado (2026-09-08, pedido do Clayton): a mesma
     # pessoa nao pode ser MINISTRO num domingo e de novo, poucos dias
     # depois (ou antes), na quarta-feira -- ver `esta_bloqueado_por_
@@ -100,6 +111,7 @@ def main() -> None:
 
     idx = build_header_index(agenda_raw[0])
     col_ministro = idx[COL_NOME]
+    col_email = idx["EMAIL " + COL_NOME]
 
     regras = carregar_regras_colaboradores(regras_raw)
     nomes_vistos: set[str] = set()
@@ -218,16 +230,19 @@ def main() -> None:
             # correto quando e genuinamente impossivel alocar, nao uma
             # omissao do script.
             updates.append((linha_sheet, col_ministro + 1, "SEM ALOCAÇÃO"))
+            updates.append((linha_sheet, col_email + 1, ""))
             print(f"  {d.slot.data} -> SEM ALOCAÇÃO (linha {linha_sheet})")
             continue
+        email = emails.get(d.vencedor.strip().upper(), "")
         updates.append((linha_sheet, col_ministro + 1, d.vencedor))
-        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet})")
+        updates.append((linha_sheet, col_email + 1, email))
+        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet}) "
+              f"[EMAIL MINISTRO={email or '(sem email cadastrado)'}]")
 
     guard.batch_update_cells(AGENDA_TITLE, updates)
 
-    print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Apenas a coluna"
-          " MINISTRO foi escrita -- CEIA nao foi tocada (pertence a outro grupo/FUNCAO ainda"
-          " nao processado).")
+    print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Colunas MINISTRO"
+          " e EMAIL MINISTRO foram escritas -- CEIA nao foi tocada (pertence a outro grupo/FUNCAO).")
 
 
 if __name__ == "__main__":

@@ -375,3 +375,29 @@ def carregar_aniversarios(valores: list[list[str]]) -> dict[str, date]:
             continue
         aniversarios[nome] = nascimento
     return aniversarios
+
+
+def carregar_emails(valores: list[list[str]]) -> dict[str, str]:
+    """Le a aba BP SERVICE e devolve {NOME em maiusculas: EMAIL}, para
+    escrever automaticamente o email do colaborador alocado na coluna
+    "EMAIL <FUNÇÃO>" ao lado da coluna de alocacao em AppAnualGlobal (pedido
+    do Clayton, 2026-09-11 -- ex.: quem for escrito em MINISTRO tem o email
+    escrito em "EMAIL MINISTRO", quem for escrito em CEIA tem o email
+    escrito em "EMAIL CEIA"). Usa a coluna "EMAIL" (nao "USEREMAIL", que
+    registra quem sincronizou o cadastro, nao o proprio email da pessoa).
+    Linhas sem NOME ou sem EMAIL sao ignoradas -- nomes sem email cadastrado
+    (ex.: "Culto de Oração", que e um placeholder, nao uma pessoa) apenas
+    nao geram entrada, e a celula de email fica em branco."""
+    if not valores:
+        return {}
+    idx = build_header_index(valores[0])
+    emails: dict[str, str] = {}
+    for row in valores[1:]:
+        nome = get(row, idx, "NOME").strip().upper()
+        if not nome:
+            continue
+        email = get(row, idx, "EMAIL").strip()
+        if not email:
+            continue
+        emails[nome] = email
+    return emails

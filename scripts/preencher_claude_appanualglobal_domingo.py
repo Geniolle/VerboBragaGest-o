@@ -59,7 +59,7 @@ from pastoreio_orquestrador.config import load_settings
 from pastoreio_orquestrador.models import SlotAgenda
 from pastoreio_orquestrador.motor import (
     EstadoExecucaoGrupo, alocar_grupo, calcular_demanda_onda_expansiva,
-    delimitar_uma_ronda,
+    delimitar_uma_ronda, filtrar_slots_ja_preenchidos,
 )
 from pastoreio_orquestrador.parsing_utils import (
     is_last_occurrence_of_month, month_key, parse_date_ddmmyyyy, week_of_month,
@@ -161,11 +161,19 @@ def main() -> None:
 
     estado = EstadoExecucaoGrupo(historico_total={}, zumbis_prioritarios=zumbis)
 
-    def processar_bloco(datas: list[date], aplicar_cruzados: bool = False) -> list:
+    def processar_bloco(
+        datas: list[date], aplicar_cruzados: bool = False, ronda_aberta: bool = False,
+    ) -> list:
         slots = [
             montar_slot(agenda_raw[row_por_data[d]], idx, row_por_data[d], d)
             for d in datas
         ]
+        if ronda_aberta:
+            # Regra global (ver motor.filtrar_slots_ja_preenchidos): datas ja
+            # preenchidas dentro da Ronda aberta (ex.: feriado marcado a
+            # mao) nao contam como vaga real -- nunca aplicar no replay de
+            # uma Ronda fechada.
+            slots = filtrar_slots_ja_preenchidos(slots, valor_por_data)
         meses_tocados = len({s.mes_key for s in slots})
         demanda = calcular_demanda_onda_expansiva(
             grupo, vagas_reais_no_periodo=len(slots), meses_tocados=meses_tocados
@@ -209,7 +217,7 @@ def main() -> None:
     print(f"Ronda a escrever: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
-    decisoes = processar_bloco(ronda_para_escrever, aplicar_cruzados=True)
+    decisoes = processar_bloco(ronda_para_escrever, aplicar_cruzados=True, ronda_aberta=True)
 
     print(f"Escrevendo {DEPARTAMENTO}/{FUNCAO}/{DIA} na coluna "
           f"MINISTRO (col {col_ministro + 1}) de {AGENDA_TITLE}...\n")

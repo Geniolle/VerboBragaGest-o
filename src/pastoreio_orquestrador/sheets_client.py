@@ -113,6 +113,16 @@ class SpreadsheetGuard:
         ws = self.spreadsheet.worksheet(title)
         ws.append_row(values)
 
+    def append_rows(self, title: str, rows: list[list[str]]) -> None:
+        """Acrescenta varias linhas numa UNICA chamada de API (mesmo motivo
+        de `batch_update_cells`: evitar 1 requisicao por linha). Nao faz
+        nada se `rows` estiver vazio."""
+        self._assert_is_claude_copy(title)
+        if not rows:
+            return
+        ws = self.spreadsheet.worksheet(title)
+        ws.append_rows(rows, value_input_option=gspread.utils.ValueInputOption.user_entered)
+
     def create_worksheet(self, title: str, rows: int = 100, cols: int = 26) -> gspread.Worksheet:
         """Cria uma aba nova (so permitido com prefixo CLAUDE_), apagando
         antes qualquer aba pre-existente com o mesmo nome."""

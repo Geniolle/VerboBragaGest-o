@@ -211,6 +211,61 @@ def test_delimitar_uma_ronda_sem_extensao_quando_mes_ja_fecha_exato():
     assert ronda == [date(2026, 10, 4), date(2026, 10, 11)]
 
 
+def test_filtrar_slots_ja_preenchidos_remove_so_as_datas_com_valor():
+    from pastoreio_orquestrador.motor import filtrar_slots_ja_preenchidos
+
+    slots = [_slot(1, date(2026, 10, 4)), _slot(2, date(2026, 10, 11)), _slot(3, date(2026, 10, 18))]
+    valor_por_data = {
+        date(2026, 10, 4): "",
+        date(2026, 10, 11): "Fulano",  # ex.: feriado marcado a mao
+        date(2026, 10, 18): "",
+    }
+    restantes = filtrar_slots_ja_preenchidos(slots, valor_por_data)
+    assert [s.data for s in restantes] == [date(2026, 10, 4), date(2026, 10, 18)]
+
+
+def test_filtrar_slots_ja_preenchidos_nao_remove_nada_quando_tudo_vazio():
+    from pastoreio_orquestrador.motor import filtrar_slots_ja_preenchidos
+
+    slots = [_slot(1, date(2026, 10, 4)), _slot(2, date(2026, 10, 11))]
+    valor_por_data = {date(2026, 10, 4): "", date(2026, 10, 11): ""}
+    assert filtrar_slots_ja_preenchidos(slots, valor_por_data) == slots
+
+
+def test_data_ja_preenchida_na_ronda_aberta_nao_consome_cota_de_ninguem():
+    # Regra global pedida pelo Clayton (2026-09-11): mes com 5 datas mas 1 ja
+    # preenchida (ex.: feriado) deve usar so 4 colaboradores -- a data
+    # preenchida nao pode "gastar" o rodizio/cota de ninguem, mesmo nao
+    # sendo escrita de volta.
+    from pastoreio_orquestrador.motor import filtrar_slots_ja_preenchidos
+
+    # 5 candidatos (N=5), 5 datas no MESMO mes (1 vaga por pessoa por mes),
+    # prioridades distintas para o rodizio ser deterministico.
+    candidatos = [
+        _regra(f"Pessoa{i}", repeticao_mensal=1, prioridade=i * 10) for i in range(1, 6)
+    ]
+    todas_as_datas = [date(2026, 10, d) for d in (1, 8, 15, 22, 29)]
+    valor_por_data = {d: "" for d in todas_as_datas}
+    valor_por_data[date(2026, 10, 15)] = "FERIADO"  # pre-preenchida, fora do algoritmo
+
+    todos_os_slots = [_slot(i, d) for i, d in enumerate(todas_as_datas, start=1)]
+    slots_pendentes = filtrar_slots_ja_preenchidos(todos_os_slots, valor_por_data)
+    assert len(slots_pendentes) == 4  # so 4 vagas reais, nao 5
+
+    meses_tocados = len({s.mes_key for s in slots_pendentes})
+    demanda = calcular_demanda_onda_expansiva(
+        candidatos, vagas_reais_no_periodo=len(slots_pendentes), meses_tocados=meses_tocados
+    )
+    estado = EstadoExecucaoGrupo(historico_total={})
+    decisoes = alocar_grupo(candidatos, slots_pendentes, estado, demanda.mapa_limites_locais)
+
+    vencedores = {d.vencedor for d in decisoes}
+    assert None not in vencedores
+    assert len(vencedores) == 4  # so 4 dos 5 colaboradores tiveram o rodizio "gasto"
+    for c in candidatos:
+        assert estado.uso_no_mes.get(c.nome, 0) <= 1
+
+
 def test_descanso_cruzado_bloqueia_mesma_pessoa_em_outro_dia_da_semana_muito_perto():
     # "Descanso minimo cruzado" (2026-09-08, pedido do Clayton apos achar
     # casos reais de MINISTRO alocado num domingo e de novo poucos dias

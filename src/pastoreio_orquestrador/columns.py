@@ -32,6 +32,24 @@ class ColBpAlgoritimo:
     TYPE = "TYPE"
 
 
+class ColBpService:
+    ID_USER = "ID_USER"
+    NOME = "NOME"
+    EMAIL = "EMAIL"
+    DEPARTAMENTOS = "DEPARTAMENTOS"
+    INATIVO = "INATIVO"
+    TYPE = "TYPE"
+    DEPARTAMENTO_PREFIXO = "D. "
+    # Excluida da deteccao de colunas de departamento -- mesma excecao do
+    # script original (ProcessarBPService_BPAlgoritimo_v12).
+    DEPARTAMENTO_EXCLUIDO = "D. CENTRO DE CURA"
+
+
+class ColIdDepartamentos:
+    DEPARTAMENTOS = "DEPARTAMENTOS"
+    EMAIL = "EMAIL"
+
+
 class ColAppAnualGlobal:
     PERIODO = "PERÍODO"
     MES = "MÊS"

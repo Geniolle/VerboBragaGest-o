@@ -1,38 +1,33 @@
 # -*- coding: utf-8 -*-
-"""Preenche a coluna CEIA da CLAUDE_AppAnualGlobal (D. MINISTROS / CEIA /
-DOMINGO) com EXATAMENTE UMA Ronda (ciclo completo) por execucao -- nunca mais
-de uma. Respeita qualquer alocacao ja existente na coluna CEIA (nao
-sobrescreve) e comeca a proxima Ronda a partir do primeiro 1o-domingo-do-mes
-futuro ainda vazio; para rodar a Ronda seguinte, execute o script de novo.
+"""Preenche a coluna AUXILIAR da CLAUDE_AppAnualGlobal (D. AUXILIAR / AUXILIAR
+/ DOMINGO) com EXATAMENTE UMA Ronda (ciclo completo) por execucao -- nunca
+mais de uma. Respeita qualquer alocacao ja existente na coluna AUXILIAR (nao
+sobrescreve) e comeca a proxima Ronda a partir do primeiro domingo futuro
+ainda vazio; para rodar a Ronda seguinte, execute o script de novo.
 
-Processo novo (pedido do Clayton, 2026-09-11): FUNÇÃO="CEIA" e distinta de
-FUNÇÃO="MINISTRO" (serve a Ceia do Senhor, nao prega) e so acontece no 1o
-domingo de cada mes -- por isso os slots aqui sao filtrados por
-`week_of_month(d) == 1`, ao contrario do script de MINISTRO/DOMINGO que
-processa todos os domingos.
+Irmao de `preencher_claude_appanualglobal_domingo.py` (D. MINISTROS/MINISTRO/
+DOMINGO) -- mesmo padrao de "replay das Rondas ja fechadas + escreve so a
+primeira Ronda aberta", mesmo mecanismo de CEIA ALTERNADA (que aqui tambem se
+aplica: varios colaboradores AUXILIAR/DOMINGO tem `CEIA ALTERNADA=TRUE`
+cadastrado, entao `alocar_grupo` entra sozinho no algoritmo em 4 fases -- ver
+CONCEITO_CEIA_ALTERNADA.md) e mesmo descanso minimo cruzado com a
+quarta-feira. Nao ha compatibilidade de TEMA aqui -- esse conceito (aba
+"Livros") e exclusivo de D. MINISTROS/MINISTRO.
 
-Descoberta e corrigida antes deste script existir (2026-09-11): o cabecalho
-da coluna G em "CLAUDE_BP ALGORITIMO" estava em branco (deveria ser
-"PRIORIDADE NA ALOCAÇÃO") -- um resto da mudanca de posicao da coluna
-"SEMANA PREFERENCIAL" feita em 2026-09-08, que nunca teve o cabecalho
-atualizado. Isso fazia `carregar_regras_colaboradores` devolver
-prioridade=999 (default) para TODO MUNDO em TODOS os grupos, nao so CEIA --
-so nao tinha quebrado nenhum resultado ate agora porque a ordem das linhas
-na sheet ja coincidia com a ordem de prioridade pretendida (o desempate por
-ordem de insercao do Python mascarava o problema). Corrigido escrevendo de
-volta o texto do cabecalho na propria celula (nenhum dado de colaborador foi
-alterado) -- ver `scratch/corrigir_header_prioridade.py`.
+Diferenca pedida pelo Clayton, 2026-09-11: D. AUXILIAR tem uma coluna extra
+em BP ALGORITIMO, "ATRIBUIR AOS RECADOS". Sempre que o vencedor de um slot
+tem essa marcacao TRUE, o MESMO colaborador tambem e escrito na coluna
+RECADOS (e "EMAIL RECADOS") daquela mesma linha/data -- alem de AUXILIAR e
+"EMAIL AUXILIAR". Quando a marcacao e FALSE (ou nao ha vencedor), a coluna
+RECADOS nao e tocada. Confirmado que "D. RECADOS" em BP ALGORITIMO nao e um
+processo proprio (todas as linhas de lá tem FUNÇÃO/DIA DA SEMANA em branco,
+ignoradas por `carregar_regras_colaboradores`) -- RECADOS so e preenchida por
+este mecanismo, nunca por um grupo/processo independente.
 
-Nao usa `carregar_compromissos_cruzados` (descanso minimo cruzado entre
-quarta-feira e domingo): esse conceito e especifico da FUNÇÃO="MINISTRO"
-(mesma pessoa pregando duas vezes em poucos dias); CEIA nao tem par de
-quarta-feira, entao a checagem nao se aplica aqui.
-
-Email automatico (pedido do Clayton, 2026-09-11): sempre que um nome e
-escrito na coluna CEIA, o email correspondente (aba "BP SERVICE", coluna
-EMAIL, casado por NOME) e escrito junto na coluna "EMAIL CEIA" -- o padrao
-e sempre "EMAIL <nome da coluna de alocacao>". Nomes sem email cadastrado
-(ex.: placeholders) ficam com a celula de email em branco, sem erro.
+Email automatico (mesmo padrao dos demais processos, pedido do Clayton,
+2026-09-11): o email de quem e escrito em AUXILIAR vai para "EMAIL AUXILIAR"
+e o de quem e escrito em RECADOS vai para "EMAIL RECADOS", ambos casados por
+NOME na aba "BP SERVICE".
 
 Escreve exclusivamente na copia CLAUDE_AppAnualGlobal (guard bloqueia
 qualquer tentativa em aba sem o prefixo).
@@ -43,9 +38,9 @@ from datetime import date
 
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
-    carregar_emails, carregar_excluse_matriz, carregar_regras_colaboradores,
-    carregar_zumbis_prioritarios, extrair_assiduidade_da_linha,
-    extrair_papeis_da_linha, get,
+    carregar_compromissos_cruzados, carregar_emails, carregar_excluse_matriz,
+    carregar_regras_colaboradores, carregar_zumbis_prioritarios,
+    extrair_assiduidade_da_linha, extrair_papeis_da_linha, get,
 )
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
 from pastoreio_orquestrador.config import load_settings
@@ -59,9 +54,10 @@ from pastoreio_orquestrador.parsing_utils import (
 )
 from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
-DEPARTAMENTO, FUNCAO, DIA = "D. MINISTROS", "CEIA", "DOMINGO"
+DEPARTAMENTO, FUNCAO, DIA = "D. AUXILIAR", "AUXILIAR", "DOMINGO"
 AGENDA_TITLE = "CLAUDE_AppAnualGlobal"
-COL_NOME = "CEIA"
+COL_NOME = "AUXILIAR"
+COL_RECADOS = "RECADOS"
 
 
 def montar_slot(row: list[str], idx: dict[str, int], row_i: int, d: date) -> SlotAgenda:
@@ -69,7 +65,7 @@ def montar_slot(row: list[str], idx: dict[str, int], row_i: int, d: date) -> Slo
         row_index=row_i,
         data=d,
         dia_da_semana=DIA,
-        tema="",  # tema livre, mesma regra do domingo comum
+        tema="",  # AUXILIAR nao tem conceito de tema (exclusivo de MINISTRO)
         mes_key=month_key(d),
         semana_do_mes=week_of_month(d),
         is_ultima_ocorrencia_do_mes=is_last_occurrence_of_month(d),
@@ -90,12 +86,20 @@ def main() -> None:
     bp_service_raw = guard.read_worksheet("BP SERVICE")
     aniversarios = carregar_aniversarios(bp_service_raw)
     # Email automatico (pedido do Clayton, 2026-09-11): quem for escrito em
-    # CEIA tem o email escrito em "EMAIL CEIA", casado por NOME em BP SERVICE.
+    # AUXILIAR tem o email escrito em "EMAIL AUXILIAR", e quem for escrito em
+    # RECADOS tem o email escrito em "EMAIL RECADOS", casados por NOME em
+    # BP SERVICE.
     emails = carregar_emails(bp_service_raw)
+    # Descanso minimo cruzado (mesmo mecanismo do irmao D. MINISTROS/MINISTRO):
+    # o mesmo colaborador nao pode ser AUXILIAR num domingo e de novo, poucos
+    # dias depois (ou antes), na quarta-feira.
+    compromissos_cruzados = carregar_compromissos_cruzados(agenda_raw, COL_NOME, DIA)
 
     idx = build_header_index(agenda_raw[0])
-    col_ceia = idx[COL_NOME]
+    col_auxiliar = idx[COL_NOME]
     col_email = idx["EMAIL " + COL_NOME]
+    col_recados = idx[COL_RECADOS]
+    col_email_recados = idx["EMAIL " + COL_RECADOS]
 
     regras = carregar_regras_colaboradores(regras_raw)
     nomes_vistos: set[str] = set()
@@ -106,11 +110,15 @@ def main() -> None:
                 continue
             nomes_vistos.add(r.nome)
             grupo.append(r)
+    # Pedido do Clayton (2026-09-11): consultar ATRIBUIR AOS RECADOS de quem
+    # vence cada slot -- ver `RegraColaborador.atribuir_aos_recados`.
+    regras_por_nome = {r.nome: r for r in grupo}
 
     bp_log = carregar_bp_log(bp_log_raw)
     zumbis = carregar_zumbis_prioritarios(bp_log, DEPARTAMENTO, FUNCAO)
 
-    # So o 1o domingo de cada mes -- e quando a Ceia do Senhor acontece.
+    # Todos os domingos do grupo na sheet (passado e futuro), com o valor
+    # AUXILIAR atual -- preenchido (Ronda ja fechada) ou vazio.
     linhas_agenda: list[tuple[int, date, str]] = []
     for row_i, row in enumerate(agenda_raw[1:], start=1):
         dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
@@ -119,19 +127,19 @@ def main() -> None:
         d = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
         if d is None:
             continue
-        if week_of_month(d) != 1:
-            continue
         linhas_agenda.append((row_i, d, get(row, idx, COL_NOME).strip()))
     linhas_agenda.sort(key=lambda t: t[1])
 
     if not linhas_agenda:
-        print("Nenhum 1o domingo do mes encontrado na sheet. Fim.")
+        print("Nenhum domingo encontrado na sheet. Fim.")
         return
 
     valor_por_data = {d: m for _, d, m in linhas_agenda}
     row_por_data = {d: row_i for row_i, d, _ in linhas_agenda}
     n_ativos = len(grupo)
 
+    # Recorta a sequencia inteira de Rondas (blocos de n_ativos domingos,
+    # estendidos ate fechar o mes) na ordem em que foram/serao preenchidas.
     todas_as_datas = [d for _, d, _ in linhas_agenda]
     restantes = todas_as_datas[:]
     blocos: list[list[date]] = []
@@ -144,7 +152,9 @@ def main() -> None:
 
     estado = EstadoExecucaoGrupo(historico_total={}, zumbis_prioritarios=zumbis)
 
-    def processar_bloco(datas: list[date], ronda_aberta: bool = False) -> list:
+    def processar_bloco(
+        datas: list[date], aplicar_cruzados: bool = False, ronda_aberta: bool = False,
+    ) -> list:
         slots = [
             montar_slot(agenda_raw[row_por_data[d]], idx, row_por_data[d], d)
             for d in datas
@@ -163,6 +173,7 @@ def main() -> None:
             grupo, slots, estado, demanda.mapa_limites_locais,
             excluse_header=excluse_header, excluse_rows=excluse_rows,
             mapa_limites_mensais=demanda.mapa_limites_mensais,
+            compromissos_cruzados=compromissos_cruzados if aplicar_cruzados else None,
             aniversarios=aniversarios,
         )
 
@@ -170,25 +181,29 @@ def main() -> None:
     for bloco in blocos:
         fechada = all(valor_por_data[d] for d in bloco)
         if fechada:
-            # Replay: alimenta o rodizio (CEIA ALTERNADA exclui o vencedor
-            # do mes anterior) sem escrever nada de volta.
-            processar_bloco(bloco)
+            # Replay: reproduz a Ronda ja gravada so para alimentar o
+            # rodizio -- nao escreve nada de volta. Nao aplica o descanso
+            # minimo cruzado aqui (mesmo motivo do irmao MINISTRO/DOMINGO):
+            # `compromissos_cruzados` reflete o estado ATUAL inteiro da
+            # sheet, entao usa-lo no replay quebraria a premissa de que ele
+            # reproduz exatamente o que ja foi gravado.
+            processar_bloco(bloco, aplicar_cruzados=False)
             continue
         ronda_para_escrever = bloco
         break
 
     if ronda_para_escrever is None:
-        print("Nenhuma Ronda com CEIA vazia encontrada (tudo ja preenchido ate onde ha dados). Fim.")
+        print("Nenhuma Ronda com domingos vazios encontrada (tudo ja preenchido ate onde ha dados). Fim.")
         return
 
     print(f"N (colaboradores ativos no grupo) = {n_ativos}")
-    print(f"Ronda a escrever: {len(ronda_para_escrever)} 1o-domingo(s) do mes "
+    print(f"Ronda a escrever: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
-    decisoes = processar_bloco(ronda_para_escrever, ronda_aberta=True)
+    decisoes = processar_bloco(ronda_para_escrever, aplicar_cruzados=True, ronda_aberta=True)
 
     print(f"Escrevendo {DEPARTAMENTO}/{FUNCAO}/{DIA} na coluna "
-          f"CEIA (col {col_ceia + 1}) de {AGENDA_TITLE}...\n")
+          f"AUXILIAR (col {col_auxiliar + 1}) de {AGENDA_TITLE}...\n")
 
     updates: list[tuple[int, int, str]] = []
     for d in decisoes:
@@ -197,20 +212,26 @@ def main() -> None:
             continue
         linha_sheet = d.slot.row_index + 1  # +1: header ocupa a linha 1
         if d.vencedor is None:
-            updates.append((linha_sheet, col_ceia + 1, "SEM ALOCAÇÃO"))
+            updates.append((linha_sheet, col_auxiliar + 1, "SEM ALOCAÇÃO"))
             updates.append((linha_sheet, col_email + 1, ""))
             print(f"  {d.slot.data} -> SEM ALOCAÇÃO (linha {linha_sheet})")
             continue
         email = emails.get(d.vencedor.strip().upper(), "")
-        updates.append((linha_sheet, col_ceia + 1, d.vencedor))
+        updates.append((linha_sheet, col_auxiliar + 1, d.vencedor))
         updates.append((linha_sheet, col_email + 1, email))
+        info_recados = ""
+        regra_vencedor = regras_por_nome.get(d.vencedor)
+        if regra_vencedor is not None and regra_vencedor.atribuir_aos_recados:
+            updates.append((linha_sheet, col_recados + 1, d.vencedor))
+            updates.append((linha_sheet, col_email_recados + 1, email))
+            info_recados = " [+ RECADOS]"
         print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet}) "
-              f"[EMAIL CEIA={email or '(sem email cadastrado)'}]")
+              f"[EMAIL AUXILIAR={email or '(sem email cadastrado)'}]{info_recados}")
 
     guard.batch_update_cells(AGENDA_TITLE, updates)
 
     print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Colunas"
-          " CEIA e EMAIL CEIA foram escritas.")
+          " AUXILIAR, EMAIL AUXILIAR e (quando aplicavel) RECADOS/EMAIL RECADOS foram escritas.")
 
 
 if __name__ == "__main__":

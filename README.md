@@ -54,6 +54,7 @@ src/pastoreio_orquestrador/
   models.py             # RegraColaborador, SlotAgenda, TemaClassificado, etc.
   parsing_utils.py       # parseBool, weekOfMonth, monthKey, isValidPreferredWeek...
   carregamento.py         # conversao das linhas cruas das sheets para os modelos
+  sincronizacao_bp_service.py  # PASSO 1 do fluxo: sincroniza BP SERVICE -> BP ALGORITIMO
   motor.py                 # motor de regras: demanda, filtros, sorter, loop + resgate
   auditoria.py              # (proposta A) monta as linhas do log de auditoria (CLAUDE_LOG_AUDITORIA)
   diagnostico.py             # compara abas/colunas reais com o que columns.py espera
@@ -64,6 +65,7 @@ src/pastoreio_orquestrador/
 scripts/
   mostrar_email_service_account.py
   verificar_acesso.py          # valida acesso + roda o diagnostico de estrutura
+  passo1_sincronizar_bp_service.py  # PRIMEIRO passo do fluxo -- roda antes de qualquer alocacao
   checklist_pre_alocacao.py    # roda as propostas E + F contra a spreadsheet real (so leitura)
   testar_ministros_quarta.py   # teste de integracao end-to-end (so escreve em CLAUDE_*)
 tests/
@@ -76,7 +78,45 @@ tests/
   test_zumbi_writeback.py
   test_alerta_sem_alocacao.py
   test_protocolo_validacao.py
+  test_sincronizacao_bp_service.py
 ```
+
+## Passo 1 do fluxo: sincronizacao BP SERVICE -> BP ALGORITIMO
+
+Antes de qualquer script de alocacao (`preencher_claude_appanualglobal_*`),
+`scripts/passo1_sincronizar_bp_service.py` mantem `BP ALGORITIMO` em dia com
+o cadastro de `BP SERVICE`. Porte de `ProcessarBPService_BPAlgoritimo_v12`
++ `ReverterBPService_BPAlgoritimo` (Apps Script), com duas mudancas de
+regra pedidas pelo Clayton (2026-09-11):
+
+- **Contas de sistema excluidas da selecao**: uma linha de `BP SERVICE` com
+  a coluna `TYPE` preenchida (valor real observado: `"SY"`) nunca entra na
+  selecao, mesmo com `DEPARTAMENTOS`/departamento marcados. So `TYPE` vazio
+  conta como pessoa elegivel.
+- **Reversao sem apagar linha**: em vez de `deleteRow`, quando um vinculo
+  pessoa+departamento deixa de bater com a selecao atual de `BP SERVICE`
+  (pessoa inativada, virou conta de sistema, ou desmarcou o departamento),
+  a linha correspondente em `BP ALGORITIMO` e marcada `ATIVO=FALSE` -- nada
+  e removido fisicamente. Simetricamente, se um vinculo ja desativado volta
+  a bater com a selecao, e reativado (`ATIVO=TRUE`).
+- **`ID_TABLE` deixou de ser sequencial**: passa a receber o `ID_USER` da
+  pessoa em `BP SERVICE` (referencia ao cadastro de origem), em vez de ser
+  renumerado 1, 2, 3... a cada execucao.
+
+So escreve em abas `CLAUDE_*` (`SpreadsheetGuard` bloqueia qualquer outra
+coisa) e por padrao roda em modo consulta (`dry-run`, nao escreve nada);
+passe `--aplicar` para gravar de fato.
+
+**Achado da validacao contra dados reais (2026-09-11, ainda nao confirmado
+pelo Clayton)**: rodando em dry-run contra `CLAUDE_BP ALGORITIMO`, o plano
+calculado foi 11 insercoes, 1 desativacao e **148 reativacoes**. O volume
+alto de reativacoes sugere que `ATIVO=FALSE` em `BP ALGORITIMO` hoje nao
+significa so "a pessoa saiu do departamento em BP SERVICE" -- pode haver
+linhas desativadas manualmente por outros motivos (ex.: pausa pontual numa
+funcao especifica) mesmo com a pessoa continuando marcada no departamento
+geral. **Por isso o `--aplicar` ainda nao foi rodado contra nenhuma copia
+real** -- precisa de confirmacao do Clayton sobre se a reativacao
+automatica e o comportamento desejado antes de usar este passo de verdade.
 
 ## Propostas de melhoria (A–F) e seu status
 

@@ -133,6 +133,34 @@ def delimitar_uma_ronda(datas_disponiveis: list[date], n_colaboradores_ativos: i
     return datas_ronda
 
 
+def filtrar_slots_ja_preenchidos(
+    slots: list[SlotAgenda], valor_por_data: dict[date, str],
+) -> list[SlotAgenda]:
+    """Remove do lote os slots cuja data ja tem valor preenchido na sheet.
+
+    Regra GLOBAL (pedido do Clayton, 2026-09-11), valida para todo write-back
+    existente e qualquer outro que venha a ser criado: uma data que chega
+    preenchida na Ronda ABERTA (a que sera de fato calculada e escrita agora)
+    -- por exemplo um feriado marcado manualmente, ou qualquer outro
+    preenchimento fora do algoritmo -- nao e uma vaga REAL a distribuir. Se
+    ela fosse contada, `calcular_demanda_onda_expansiva` superestimaria
+    `vagas_reais_no_periodo` e `alocar_grupo` "gastaria" o rodizio/cota
+    mensal de um colaborador (via `_registrar_vencedor`) numa data em que
+    nada sera de fato escrito -- mesmo o write-back pulando a escrita da
+    celula no final, o dano ao `estado` (cota, ultima_data_usada, historico)
+    ja teria ocorrido. Ex.: mes com 5 datas mas 1 ja preenchida -> so 4 vagas
+    reais, so 4 colaboradores usados (nao 5).
+
+    Chamar APENAS ao montar os slots da Ronda aberta -- nunca ao fazer o
+    replay de uma Ronda ja fechada (`fechada = all(valor_por_data[d] for d
+    in bloco)`): ali TODAS as datas estao preenchidas de proposito (e o que
+    define "fechada") e precisam ser reproduzidas por inteiro para semear
+    corretamente o `estado` (cota/rodizio/historico) antes de processar a
+    proxima Ronda -- filtrar tambem nesse caso zeraria o replay inteiro.
+    """
+    return [s for s in slots if not valor_por_data.get(s.data, "").strip()]
+
+
 def agregar_por_grupo(regras: list[RegraColaborador]) -> dict[str, list[RegraColaborador]]:
     grupos: dict[str, list[RegraColaborador]] = {}
     for r in regras:

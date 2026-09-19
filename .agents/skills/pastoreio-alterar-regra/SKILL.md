@@ -41,6 +41,10 @@ fonte de verdade.
    código, nem torne global algo que só se aplica a um grupo específico
    (ex.: tema/nível já é explicitamente restrito a QUARTA-FEIRA — não
    generalize sem necessidade).
+   Para DOMINGO, lembre que a hierarquia normal é contínua entre execuções:
+   qualquer mudança nesse fluxo precisa preservar a reconstrução do cursor
+   por histórico persistido (agenda + auditoria), nunca por variável global,
+   cache local ou estado de processo.
 6. **Alterar o menor número possível de componentes.** Prefira estender
    uma função existente a duplicá-la. Se a mudança precisar de um novo
    parâmetro em `avaliar_candidatos_para_slot`/`_avaliar_e_escolher`/
@@ -55,6 +59,9 @@ fonte de verdade.
    explicitamente uma correção que invalida o comportamento antigo — nesse
    caso, atualize/renomeie o teste antigo para refletir o comportamento
    correto, não o apague silenciosamente).
+   Se a mudança toca DOMINGO, inclua cobertura de `CONSOME_HIERARQUIA`
+   quando a decisão pode ser CEIA, repetição mensal, ATM, resgate, lacuna
+   ou alocação normal.
 8. **Rodar a suite completa** (`uv run pytest`) — nunca considere a tarefa
    terminada só porque o código compila ou porque o teste novo passa
    isoladamente. Investigue qualquer falha, mesmo em teste aparentemente

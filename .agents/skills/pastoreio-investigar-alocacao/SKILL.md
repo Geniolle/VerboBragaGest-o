@@ -77,7 +77,27 @@ filtros obrigatórios, etapa 2 = desempate — ver `CONCEITO_PRIORIDADES.md`):
 14. **Auditoria já gravada**: `CLAUDE_LOG_AUDITORIA` (se a Ronda já foi
     executada com auditoria ativa) já contém motivo, runner-up e ordem
     completa de desempate para cada decisão — confira ali antes de
-    recalcular tudo manualmente.
+    recalcular tudo manualmente. Para DOMINGO, confira também
+    `CONSOME_HIERARQUIA`: somente linhas `TRUE`, confirmadas contra a
+    alocação real em `AppAnualGlobal`/`CLAUDE_AppAnualGlobal`, movem o
+    cursor da hierarquia normal entre execuções. CEIA, repetição mensal,
+    ATM, resgate e lacuna não movem esse cursor.
+
+## Investigar continuidade da hierarquia de DOMINGO
+
+Quando alguém parece ter sido "pulando" ou "reiniciado" entre execuções
+mensais, não procure uma variável em memória. Reproduza a reconstrução:
+
+1. leia a agenda persistida e a auditoria;
+2. filtre as decisões do mesmo departamento/função/dia com
+   `CONSOME_HIERARQUIA=TRUE`;
+3. confirme que cada decisão existe na agenda real na mesma data;
+4. pegue a última âncora válida em ordem cronológica;
+5. localize essa pessoa na hierarquia atual de `BP ALGORITIMO`;
+6. avance circularmente para o próximo elemento elegível.
+
+Se auditoria e agenda divergirem, reporte inconsistência em vez de inferir
+o cursor por nome ou prioridade.
 
 ## Como reproduzir uma decisão sem escrever nada
 

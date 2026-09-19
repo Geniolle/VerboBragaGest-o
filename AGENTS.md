@@ -26,6 +26,12 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   negócio específicas (ciclo/rotação, prioridades, CEIA alternada). Leia-os
   quando a tarefa tocar nesses conceitos — não copie o conteúdo deles para
   outro lugar, referencie.
+- A continuidade da hierarquia normal de DOMINGO entre execuções mensais é
+  reconstruída a partir de histórico persistido: agenda real
+  (`AppAnualGlobal`/`CLAUDE_AppAnualGlobal`) + auditoria
+  (`LOG_AUDITORIA`/`CLAUDE_LOG_AUDITORIA`) com `CONSOME_HIERARQUIA=TRUE`.
+  Não implemente cursor mensal baseado em variável global, cache local ou
+  estado de processo.
 - `GRUPOS_VALIDADOS.md` é o registo oficial de quais combinações
   `DEPARTAMENTO###FUNÇÃO###DIA DA SEMANA` já tiveram pelo menos um teste de
   integração real revisado por humano.
@@ -48,15 +54,10 @@ levanta `TentativaDeAlteracaoOriginalError` caso contrário. Código novo
 contorna a trava do Guard mesmo que, no caso concreto, o `Worksheet` em
 questão já seja uma cópia `CLAUDE_`.
 
-**Dívida técnica conhecida**: `scripts/testar_ministros_quarta.py`
-(`ws_agenda.update_cell(...)`) escreve diretamente no objeto
-`gspread.Worksheet` retornado por `duplicate_sheet_for_testing`, em vez de
-usar `guard.update_cell(...)`. Não é necessário refatorar isto
-isoladamente, mas ao tocar nesse script (ou em qualquer outro que faça o
-mesmo) corrija o padrão para passar pelo Guard em vez de repeti-lo. Todos
-os scripts de produção atuais (`preencher_claude_appanualglobal_*.py`,
-`limpar_*.py`) já usam o Guard corretamente — só este script de teste tem o
-desvio.
+Todos os scripts de produção atuais (`preencher_claude_appanualglobal_*.py`,
+`limpar_*.py`) e scripts de teste tocados recentemente devem usar o Guard
+para escrita. Se encontrar escrita direta em `gspread.Worksheet`, trate
+como dívida a corrigir quando tocar no arquivo.
 
 Escrita permitida/proibida, resumido:
 

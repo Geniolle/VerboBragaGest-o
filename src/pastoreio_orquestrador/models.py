@@ -97,6 +97,9 @@ class DecisaoAlocacao:
     candidatos_avaliados: list[str] = field(default_factory=list)
     runner_up: str | None = None
     sem_alocacao: bool = False
+    tipo_alocacao: str = ""
+    consome_hierarquia: bool = False
+    prioridade_vencedor: int | None = None
 
 
 @dataclass

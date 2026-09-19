@@ -33,18 +33,29 @@ def test_construir_linhas_auditoria_decisao_normal():
         grupo_label="D. MINISTROS/MINISTRO/QUARTA-FEIRA",
         requisitos_tema_por_slot={1: "P1"},
         timestamp_execucao="2026-09-05T10:00:00",
+        run_id="run-1",
+        departamento="D. MINISTROS",
+        funcao="MINISTRO",
+        dia_da_semana_grupo="QUARTA-FEIRA",
     )
 
     assert linhas == [
         [
+            "run-1",
             "2026-09-05T10:00:00",
             "D. MINISTROS/MINISTRO/QUARTA-FEIRA",
+            "D. MINISTROS",
+            "MINISTRO",
+            "QUARTA-FEIRA",
             "2026-09-16",
             "QUARTA-FEIRA",
             "Fé",
             "P1",
             "Ana Lima",
+            "",
             "ALOCAÇÃO NORMAL",
+            "ALOCAÇÃO NORMAL",
+            "FALSE",
             "Caio Lima",
             "Ana Lima; Caio Lima",
         ]
@@ -63,10 +74,11 @@ def test_construir_linhas_auditoria_sem_alocacao():
         [decisao], grupo_label="G", timestamp_execucao="2026-09-05T10:00:00"
     )
 
-    assert linhas[0][6] == ""  # VENCEDOR vazio
-    assert linhas[0][7] == "SEM ALOCAÇÃO"
-    assert linhas[0][8] == ""  # RUNNER_UP vazio
-    assert linhas[0][9] == ""  # nenhum candidato avaliado
+    assert linhas[0][10] == ""  # VENCEDOR vazio
+    assert linhas[0][12] == "SEM ALOCAÇÃO"
+    assert linhas[0][14] == "FALSE"
+    assert linhas[0][15] == ""  # RUNNER_UP vazio
+    assert linhas[0][16] == ""  # nenhum candidato avaliado
 
 
 def test_cabecalho_tem_uma_coluna_por_campo():

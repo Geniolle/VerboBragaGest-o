@@ -131,6 +131,65 @@ pediu a semana e bateu, outro que não tem preferência nenhuma) caíam direto
 pra PRIORIDADE — ignorando que um deles pediu aquela semana especificamente.
 Agora quem bate a preferência vence sempre, independente da prioridade.
 
+## Continuidade da hierarquia entre Rondas/execuções
+
+DOMINGO tem continuidade de hierarquia entre execuções mensais. Uma nova
+execução não começa sempre na prioridade 1: ela reconstrói a última âncora
+lendo o histórico persistido.
+
+A fonte de verdade é a combinação:
+
+1. `AppAnualGlobal` / `CLAUDE_AppAnualGlobal`: confirma quem ficou realmente
+   escalado em cada data.
+2. `LOG_AUDITORIA` / `CLAUDE_LOG_AUDITORIA`: explica o motivo da decisão e
+   informa `CONSOME_HIERARQUIA`.
+
+Somente decisões com `CONSOME_HIERARQUIA=TRUE`, confirmadas pela agenda,
+movem a âncora da hierarquia normal. A auditoria nunca pode mover o cursor
+sozinha: se o log disser que alguém consumiu a hierarquia mas a agenda não
+tiver essa alocação na mesma data/grupo/função, a execução deve gerar
+diagnóstico explícito.
+
+### O que consome a hierarquia normal
+
+Consome (`CONSOME_HIERARQUIA=TRUE`):
+
+- alocação normal de DOMINGO pela hierarquia;
+- alocação normal usada para completar a Ronda, desde que seja uma vitória
+  normal e não uma cota adicional.
+
+Não consome (`CONSOME_HIERARQUIA=FALSE`):
+
+- CEIA ALTERNADA, que tem ciclo próprio;
+- repetição mensal adicional;
+- alocação adicional causada por `ALOCAR TODOS OS MESES`;
+- resgate;
+- preenchimento/reorganização de lacuna;
+- `SEM ALOCAÇÃO`.
+
+### Como a próxima execução começa
+
+Ao iniciar uma execução mensal, o sistema:
+
+1. lê a agenda persistida;
+2. lê a auditoria;
+3. filtra as decisões com `CONSOME_HIERARQUIA=TRUE`;
+4. confirma que cada decisão existe na agenda real;
+5. escolhe a última decisão válida em ordem cronológica;
+6. localiza o colaborador na hierarquia atual de `BP ALGORITIMO`;
+7. começa pelo próximo elemento da lista atual, com wraparound.
+
+O cursor persiste identidade de colaborador, não apenas número histórico de
+prioridade. Se a prioridade mudou entre meses, a posição é resolvida contra
+a hierarquia atual. Se a última âncora deixou de existir ou foi desativada,
+o sistema procura a âncora válida anterior; se não houver nenhuma, começa do
+início da hierarquia atual.
+
+Prioridades não precisam ser sequenciais. Para `1, 3, 7, 10`, se a última
+âncora atual é prioridade `3`, a próxima tentativa é prioridade `7`, não
+`4`. Se a última âncora for o último elemento, a próxima tentativa volta ao
+primeiro.
+
 ### Por que isso garante o comportamento de "ALOCAR TODOS OS MESES + preferência = sempre o primeiro escolhido"
 
 Combinando a etapa 1.8 (filtro obrigatório) com a etapa 2.2 (rank 0 sempre

@@ -142,7 +142,11 @@ class SpreadsheetGuard:
         self._assert_is_claude_copy(title)
         existing = {ws.title: ws for ws in self.spreadsheet.worksheets()}
         if title in existing:
-            return existing[title]
+            ws = existing[title]
+            header_atual = ws.row_values(1)
+            if [str(v).strip() for v in header_atual] != [str(v).strip() for v in header]:
+                ws.update([header], "A1")
+            return ws
         ws = self.spreadsheet.add_worksheet(title=title, rows=rows, cols=cols or len(header))
         ws.update([header], "A1")
         return ws

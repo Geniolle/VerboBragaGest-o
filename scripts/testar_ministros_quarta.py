@@ -153,7 +153,7 @@ def main() -> None:
         if d.vencedor is None:
             continue
         linha_sheet = d.slot.row_index + 1  # row_index=1 (1a linha de dados) -> linha 2 na sheet (apos cabecalho)
-        ws_agenda.update_cell(linha_sheet, idx_col_nome, d.vencedor)
+        guard.update_cell(ws_agenda.title, linha_sheet, idx_col_nome, d.vencedor)
 
     print(f"\nRegistando auditoria em '{NOME_ABA_AUDITORIA}'...")
     guard.ensure_worksheet_with_header(NOME_ABA_AUDITORIA, CABECALHO_AUDITORIA)
@@ -161,9 +161,12 @@ def main() -> None:
         decisoes,
         grupo_label=f"{DEPARTAMENTO}/{FUNCAO}/{DIA_DA_SEMANA}",
         requisitos_tema_por_slot=requisitos_tema,
+        departamento=DEPARTAMENTO,
+        funcao=FUNCAO,
+        dia_da_semana_grupo=DIA_DA_SEMANA,
+        regras_por_nome={r.nome.strip().upper(): r for r in grupo},
     )
-    for linha in linhas_auditoria:
-        guard.append_row(NOME_ABA_AUDITORIA, linha)
+    guard.append_rows(NOME_ABA_AUDITORIA, linhas_auditoria)
 
     print("Concluido. Nenhuma aba original foi alterada.")
 

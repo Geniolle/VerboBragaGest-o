@@ -25,7 +25,9 @@ identificar grupo (DEPARTAMENTO + FUNÇÃO + DIA DA SEMANA)
 identificar Ronda/rotação/ciclo (ver CONCEITO_CICLO.md)
    ↓
 carregar dados e históricos (BP ALGORITIMO, AppAnualGlobal, Excluse,
-   BP LOG, LOG ALGORITIMO, BP SERVICE)
+   BP LOG, LOG ALGORITIMO, BP SERVICE, LOG_AUDITORIA)
+   ↓
+reconstruir cursor de hierarquia de DOMINGO a partir de agenda + auditoria
    ↓
 motor.py (alocar_grupo / _alocar_grupo_domingo_ceia_alternada)
    ↓
@@ -93,17 +95,23 @@ Cada script de preenchimento, na prática:
    preenchidas, e reexecuta (sem escrever) os blocos já fechados através de
    um único `EstadoExecucaoGrupo` contínuo, para reconstituir o histórico
    de rodízio/quota/descanso.
-2. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
+2. Para DOMINGO, reconstrói a âncora da hierarquia normal lendo
+   `AppAnualGlobal`/`CLAUDE_AppAnualGlobal` + `LOG_AUDITORIA`/
+   `CLAUDE_LOG_AUDITORIA`. Use somente decisões com
+   `CONSOME_HIERARQUIA=TRUE` confirmadas pela agenda real; CEIA, repetição
+   mensal, ATM, resgate e lacuna não movem o cursor. Depois do replay,
+   restaure essa âncora persistida antes de calcular a Ronda aberta.
+3. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
    base (`N` colaboradores ativos + fecho do mês), mas só a encerra depois de
    `ronda_esta_completa` confirmar que todas as participações-base e
    obrigações mensais reais foram satisfeitas.
-3. Se a Ronda aberta precisa entrar num novo mês por haver participação-base
+4. Se a Ronda aberta precisa entrar num novo mês por haver participação-base
    pendente, esse mês passa a fazer parte da Ronda e cria as obrigações de
    `ALOCAR TODOS OS MESES=true` desse mês; se as obrigações forem
    matematicamente impossíveis pelas datas/filtros, o motor deve gerar
    diagnóstico controlado em vez de avançar indefinidamente.
-4. Nunca sobrescreve uma célula já preenchida.
-5. Escreve `"SEM ALOCAÇÃO"` (texto literal) quando genuinamente não há
+5. Nunca sobrescreve uma célula já preenchida.
+6. Escreve `"SEM ALOCAÇÃO"` (texto literal) quando genuinamente não há
    candidato possível — nunca deixa a célula em branco por omissão.
 
 ## 4. Escrita — sempre via SpreadsheetGuard, sempre em CLAUDE_*
@@ -117,10 +125,11 @@ Nenhum script novo deve chamar métodos de escrita diretamente num objeto
 ## 5. Auditoria
 
 `auditoria.construir_linhas_auditoria` converte cada `DecisaoAlocacao` em
-linha de log (motivo, runner-up, ordem completa de desempate), gravada de
+linha de log (RUN_ID, motivo, prioridade, `CONSOME_HIERARQUIA`, runner-up,
+ordem completa de desempate), gravada de
 forma cumulativa (nunca apaga execuções anteriores) em
 `CLAUDE_LOG_AUDITORIA` via `guard.ensure_worksheet_with_header` +
-`guard.append_row`. Os scripts de preenchimento já fazem isto — não
+`guard.append_rows`. Os scripts de preenchimento já fazem isto — não
 suprima essa etapa ao criar/adaptar um script novo.
 
 ## 6. Validação humana

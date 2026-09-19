@@ -917,6 +917,10 @@ class ContextoDesempate:
     # QUARTA-FEIRA (ver `_avaliar_e_escolher`); em qualquer outro dia fica
     # vazio e o criterio de desempate abaixo vira neutro (0 para todos).
     contagem_tema_atual: dict[str, int] = field(default_factory=dict)
+    # DOMINGO: ranking circular reconstruido a partir do ultimo colaborador
+    # que realmente consumiu a hierarquia normal em execucoes anteriores.
+    # Em QUARTA-FEIRA fica vazio para preservar o rodizio por nivel/tema.
+    rank_hierarquia_continua: dict[str, int] = field(default_factory=dict)
 
 
 def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) -> tuple:
@@ -983,12 +987,14 @@ def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) ->
     # ja visto ao introduzir a sub-janela de SEMANA PREFERENCIAL.
     contagem_tema = ctx.contagem_tema_atual.get(r.nome, 0)
     prioridade = r.prioridade
+    rank_hierarquia = ctx.rank_hierarquia_continua.get(r.nome, prioridade)
 
     return (
         reserva_ceia_penalizada,
         rank_semana_preferencial,
         semana_alternada_penalizada,
         contagem_tema,
+        rank_hierarquia,
         prioridade,
         # zumbi_vence,
         # historico,
@@ -1051,6 +1057,81 @@ class EstadoExecucaoGrupo:
     # -- usado como CRITERIO DE DESEMPATE (nao filtro obrigatorio, ver
     # `chave_ordenacao_candidato`), entao nunca gera SEM ALOCAÇÃO novo.
     historico_vencedores_por_tema: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Ancora persistida/reconstruida da hierarquia normal de DOMINGO. Deve
+    # ser semeada a partir de AppAnualGlobal + auditoria no inicio da execucao.
+    cursor_hierarquia: str | None = None
+    # Referencia congelada para ordenar a execucao atual. O cursor final pode
+    # avancar conforme novas alocacoes normais consomem a hierarquia, mas a
+    # ordenacao da Ronda nao deve passar a disputar contra as cotas mensais.
+    cursor_hierarquia_referencia: str | None = None
+    cursor_hierarquia_referencia_fixada: bool = False
+    # Controle apenas da Ronda em processamento: a primeira alocacao normal
+    # de cada colaborador consome a hierarquia; repeticoes/cotas adicionais
+    # nao deslocam o cursor.
+    hierarquia_consumida_na_ronda: set[str] = field(default_factory=set)
+
+
+def ordenar_hierarquia_atual(regras: list[RegraColaborador]) -> list[RegraColaborador]:
+    return sorted(regras, key=lambda r: (r.prioridade, r.nome.upper()))
+
+
+def montar_rank_hierarquia_continua(
+    regras: list[RegraColaborador], cursor_hierarquia: str | None
+) -> dict[str, int]:
+    hierarquia = ordenar_hierarquia_atual(regras)
+    if not hierarquia or not cursor_hierarquia:
+        return {}
+    nomes = [r.nome for r in hierarquia]
+    try:
+        indice_cursor = nomes.index(cursor_hierarquia)
+    except ValueError:
+        return {}
+    ordem = nomes[indice_cursor + 1:] + nomes[:indice_cursor + 1]
+    return {nome: rank for rank, nome in enumerate(ordem)}
+
+
+def _cursor_hierarquia_referencia(estado: EstadoExecucaoGrupo) -> str | None:
+    if not estado.cursor_hierarquia_referencia_fixada:
+        estado.cursor_hierarquia_referencia = estado.cursor_hierarquia
+        estado.cursor_hierarquia_referencia_fixada = True
+    return estado.cursor_hierarquia_referencia
+
+
+def _decisao_consome_hierarquia(motivo: str, vencedor: CandidatoRuntime, slot: SlotAgenda, estado: EstadoExecucaoGrupo) -> bool:
+    if "DOMINGO" not in slot.dia_da_semana.upper():
+        return False
+    if eh_slot_ceia(slot) or motivo == "CEIA ALTERNADA":
+        return False
+    if motivo not in ("ALOCAÇÃO NORMAL", "ALOCAÇÃO NORMAL (RODÍZIO QUEBRADO P/ FECHAR LACUNA)"):
+        return False
+    return vencedor.nome not in estado.hierarquia_consumida_na_ronda
+
+
+def _montar_decisao(
+    estado: EstadoExecucaoGrupo,
+    slot: SlotAgenda,
+    vencedor: CandidatoRuntime,
+    motivo: str,
+    candidatos_avaliados: list[str],
+    runner_up: str | None = None,
+    consome_hierarquia: bool | None = None,
+) -> DecisaoAlocacao:
+    if consome_hierarquia is None:
+        consome_hierarquia = _decisao_consome_hierarquia(motivo, vencedor, slot, estado)
+    if consome_hierarquia:
+        estado.cursor_hierarquia = vencedor.nome
+        estado.hierarquia_consumida_na_ronda.add(vencedor.nome)
+    tipo = "NORMAL" if consome_hierarquia else motivo
+    return DecisaoAlocacao(
+        slot=slot,
+        vencedor=vencedor.nome,
+        motivo=motivo,
+        candidatos_avaliados=candidatos_avaliados,
+        runner_up=runner_up,
+        tipo_alocacao=tipo,
+        consome_hierarquia=consome_hierarquia,
+        prioridade_vencedor=vencedor.regra.prioridade,
+    )
 
 
 def avaliar_candidatos_para_slot(
@@ -1303,6 +1384,8 @@ def _avaliar_e_escolher(
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
     meses_da_ronda: set[str] | None = None,
+    usar_cursor_hierarquia: bool = True,
+    hierarquia_cursor_regras: list[RegraColaborador] | None = None,
 ) -> tuple[CandidatoRuntime | None, list[str], bool, bool]:
     """Roda a cascata de filtros (+ quebra de rodizio de nivel e/ou resgate,
     se necessario) e o desempate sobre `pool`. Devolve (vencedor_ou_None,
@@ -1371,6 +1454,8 @@ def _avaliar_e_escolher(
     if not validos:
         return None, [], usou_resgate, usou_quebra_rodizio
 
+    slot_e_ceia = (slot.row_index in slots_ceia) or eh_slot_ceia(slot)
+    regras_cursor = hierarquia_cursor_regras or pool
     ctx = ContextoDesempate(
         slot=slot,
         uso_mes_anterior=estado.uso_no_mes,
@@ -1382,10 +1467,15 @@ def _avaliar_e_escolher(
         zumbis_prioritarios=estado.zumbis_prioritarios,
         ultima_data_usada=estado.ultima_data_usada,
         funcao_tem_restricao_ceia=funcao_tem_restricao_ceia,
-        slot_e_ceia=(slot.row_index in slots_ceia) or eh_slot_ceia(slot),
+        slot_e_ceia=slot_e_ceia,
         contagem_tema_atual=(
             estado.historico_vencedores_por_tema.get(slot.tema.strip().upper(), {})
             if "QUARTA" in slot.dia_da_semana.upper() and slot.tema
+            else {}
+        ),
+        rank_hierarquia_continua=(
+            montar_rank_hierarquia_continua(regras_cursor, _cursor_hierarquia_referencia(estado))
+            if usar_cursor_hierarquia and "DOMINGO" in slot.dia_da_semana.upper() and not slot_e_ceia
             else {}
         ),
     )
@@ -1613,11 +1703,12 @@ def alocar_grupo(
 
         motivo = _motivo_normal(vencedor, usou_resgate, usou_quebra_rodizio)
         _registrar_vencedor(estado, vencedor, slot)
-        decisao = DecisaoAlocacao(
-            slot=slot,
-            vencedor=vencedor.nome,
-            motivo=motivo,
-            candidatos_avaliados=ordenados_nomes,
+        decisao = _montar_decisao(
+            estado,
+            slot,
+            vencedor,
+            motivo,
+            ordenados_nomes,
             runner_up=ordenados_nomes[1] if len(ordenados_nomes) > 1 else None,
         )
         decisoes_por_row[slot.row_index] = decisao
@@ -1687,6 +1778,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
             meses_da_ronda=meses_da_ronda,
+            usar_cursor_hierarquia=False,
         )
         if vencedor is None:
             decisoes_por_row[slot.row_index] = DecisaoAlocacao(
@@ -1699,12 +1791,14 @@ def _alocar_grupo_domingo_ceia_alternada(
             if uso >= vencedor.regra.cota_base:
                 vencedores_ceia_sem_atm.add(vencedor.nome)
         motivo = "RESGATE" if usou_resgate else "CEIA ALTERNADA"
-        decisoes_por_row[slot.row_index] = DecisaoAlocacao(
-            slot=slot,
-            vencedor=vencedor.nome,
-            motivo=motivo,
-            candidatos_avaliados=ordenados_nomes,
+        decisoes_por_row[slot.row_index] = _montar_decisao(
+            estado,
+            slot,
+            vencedor,
+            motivo,
+            ordenados_nomes,
             runner_up=ordenados_nomes[1] if len(ordenados_nomes) > 1 else None,
+            consome_hierarquia=False,
         )
 
     # Fase 2: remove da fila das datas normais quem venceu a CEIA (exceto
@@ -1726,6 +1820,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
             meses_da_ronda=meses_da_ronda,
+            hierarquia_cursor_regras=regras_grupo,
         )
         if vencedor is None:
             slots_sem_fechar.append(slot)
@@ -1736,11 +1831,12 @@ def _alocar_grupo_domingo_ceia_alternada(
             if uso >= vencedor.regra.cota_base:
                 nomes_disponiveis_fase3.discard(vencedor.nome)
         motivo = _motivo_normal(vencedor, usou_resgate)
-        decisoes_por_row[slot.row_index] = DecisaoAlocacao(
-            slot=slot,
-            vencedor=vencedor.nome,
-            motivo=motivo,
-            candidatos_avaliados=ordenados_nomes,
+        decisoes_por_row[slot.row_index] = _montar_decisao(
+            estado,
+            slot,
+            vencedor,
+            motivo,
+            ordenados_nomes,
             runner_up=ordenados_nomes[1] if len(ordenados_nomes) > 1 else None,
         )
 
@@ -1779,6 +1875,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
             meses_da_ronda=meses_da_ronda,
+            usar_cursor_hierarquia=False,
         )
         if vencedor is None:
             vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
@@ -1789,6 +1886,7 @@ def _alocar_grupo_domingo_ceia_alternada(
                 aniversarios=aniversarios,
                 compromissos_cruzados=compromissos_cruzados,
                 meses_da_ronda=meses_da_ronda,
+                usar_cursor_hierarquia=False,
             )
         motivo = "PREENCHIMENTO DE LACUNA"
         if vencedor is None:
@@ -1815,8 +1913,13 @@ def _alocar_grupo_domingo_ceia_alternada(
                 cand_substituto = CandidatoRuntime(regra=regra_substituta)
                 _registrar_vencedor(estado, cand_substituto, slot_vizinho)
                 estado.historico_vencedores_lacuna.append(regra_substituta.nome)
-                decisoes_por_row[slot_vizinho.row_index] = DecisaoAlocacao(
-                    slot=slot_vizinho, vencedor=regra_substituta.nome, motivo="REORGANIZAÇÃO",
+                decisoes_por_row[slot_vizinho.row_index] = _montar_decisao(
+                    estado,
+                    slot_vizinho,
+                    cand_substituto,
+                    "REORGANIZAÇÃO",
+                    [regra_substituta.nome],
+                    consome_hierarquia=False,
                 )
                 vencedor = CandidatoRuntime(regra=regra_para_atual)
                 ordenados_nomes = [regra_para_atual.nome]
@@ -1828,12 +1931,14 @@ def _alocar_grupo_domingo_ceia_alternada(
             continue
         _registrar_vencedor(estado, vencedor, slot)
         estado.historico_vencedores_lacuna.append(vencedor.nome)
-        decisoes_por_row[slot.row_index] = DecisaoAlocacao(
-            slot=slot,
-            vencedor=vencedor.nome,
-            motivo=motivo,
-            candidatos_avaliados=ordenados_nomes,
+        decisoes_por_row[slot.row_index] = _montar_decisao(
+            estado,
+            slot,
+            vencedor,
+            motivo,
+            ordenados_nomes,
             runner_up=ordenados_nomes[1] if len(ordenados_nomes) > 1 else None,
+            consome_hierarquia=False,
         )
 
     return [decisoes_por_row[s.row_index] for s in slots_ordenados]

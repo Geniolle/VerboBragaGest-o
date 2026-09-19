@@ -48,6 +48,12 @@ from __future__ import annotations
 
 from datetime import date
 
+from pastoreio_orquestrador.auditoria import (
+    CABECALHO_AUDITORIA,
+    NOME_ABA_AUDITORIA,
+    construir_linhas_auditoria,
+    resolver_ultimo_cursor_hierarquia,
+)
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
     carregar_compromissos_cruzados, carregar_emails, carregar_excluse_matriz,
@@ -93,6 +99,8 @@ def main() -> None:
 
     regras_raw = guard.read_worksheet("CLAUDE_BP ALGORITIMO")
     agenda_raw = guard.read_worksheet(AGENDA_TITLE)
+    titulos = set(guard.list_worksheet_titles())
+    auditoria_raw = guard.read_worksheet(NOME_ABA_AUDITORIA) if NOME_ABA_AUDITORIA in titulos else []
     excluse_raw = guard.read_worksheet("Excluse")
     excluse_header, excluse_rows = carregar_excluse_matriz(excluse_raw)
     bp_log_raw = guard.read_worksheet("BP LOG")
@@ -122,9 +130,19 @@ def main() -> None:
                 continue
             nomes_vistos.add(r.nome)
             grupo.append(r)
+    regras_por_nome = {r.nome.strip().upper(): r for r in grupo}
 
     bp_log = carregar_bp_log(bp_log_raw)
     zumbis = carregar_zumbis_prioritarios(bp_log, DEPARTAMENTO, FUNCAO)
+    cursor = resolver_ultimo_cursor_hierarquia(
+        agenda_raw,
+        auditoria_raw,
+        grupo,
+        DEPARTAMENTO,
+        FUNCAO,
+        DIA,
+        COL_NOME,
+    )
 
     # Todos os domingos do grupo na sheet (passado e futuro), com o valor
     # MINISTRO atual -- preenchido (Ronda ja fechada) ou vazio.
@@ -159,7 +177,11 @@ def main() -> None:
         blocos.append(bloco)
         restantes = [d for d in restantes if d > bloco[-1]]
 
-    estado = EstadoExecucaoGrupo(historico_total={}, zumbis_prioritarios=zumbis)
+    estado = EstadoExecucaoGrupo(
+        historico_total={},
+        zumbis_prioritarios=zumbis,
+        cursor_hierarquia=cursor.ancora,
+    )
 
     def processar_bloco(
         datas: list[date], aplicar_cruzados: bool = False, ronda_aberta: bool = False,
@@ -214,6 +236,24 @@ def main() -> None:
         return
 
     print(f"N (colaboradores ativos no grupo) = {n_ativos}")
+    if cursor.ancora:
+        print("Continuidade da hierarquia:")
+        print(f"  Ultima alocacao normal que consumiu a hierarquia: {cursor.ancora}.")
+        print(f"  Posicao atual da ancora: {cursor.prioridade_ancora_atual}.")
+        proximo_nome = cursor.proximo_candidato.nome if cursor.proximo_candidato else "(sem candidato)"
+        print(f"  Proximo candidato inicial: {proximo_nome}.\n")
+    else:
+        print("Continuidade da hierarquia: nenhuma ancora persistida valida; inicio pela hierarquia atual.\n")
+    for diagnostico in cursor.diagnosticos:
+        print(f"  Diagnostico cursor: {diagnostico}")
+    # O replay acima alimenta CEIA, lacuna, cotas e descanso a partir das
+    # Rondas fechadas. Para a hierarquia normal mensal, a fonte de verdade e
+    # agenda + auditoria; portanto restauramos a ancora reconstruida antes de
+    # calcular a Ronda aberta.
+    estado.cursor_hierarquia = cursor.ancora
+    estado.cursor_hierarquia_referencia = cursor.ancora
+    estado.cursor_hierarquia_referencia_fixada = True
+    estado.hierarquia_consumida_na_ronda.clear()
     print(f"Ronda candidata inicial: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
@@ -282,9 +322,21 @@ def main() -> None:
               f"[EMAIL MINISTRO={email or '(sem email cadastrado)'}]")
 
     guard.batch_update_cells(AGENDA_TITLE, updates)
+    linhas_auditoria = construir_linhas_auditoria(
+        decisoes,
+        grupo_label=f"{DEPARTAMENTO}/{FUNCAO}/{DIA}",
+        departamento=DEPARTAMENTO,
+        funcao=FUNCAO,
+        dia_da_semana_grupo=DIA,
+        regras_por_nome=regras_por_nome,
+    )
+    if linhas_auditoria:
+        guard.ensure_worksheet_with_header(NOME_ABA_AUDITORIA, CABECALHO_AUDITORIA, rows=1000)
+        guard.append_rows(NOME_ABA_AUDITORIA, linhas_auditoria)
 
     print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Colunas MINISTRO"
           " e EMAIL MINISTRO foram escritas -- CEIA nao foi tocada (pertence a outro grupo/FUNCAO).")
+    print(f"{len(linhas_auditoria)} linha(s) adicionada(s) em {NOME_ABA_AUDITORIA}.")
 
 
 if __name__ == "__main__":

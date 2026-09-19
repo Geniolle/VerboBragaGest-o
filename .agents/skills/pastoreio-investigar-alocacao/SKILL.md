@@ -114,6 +114,14 @@ rejeitado não consome cursor; repetição mensal, obrigação de
 `ALOCAR TODOS OS MESES`, CEIA, resgate e lacuna também não avançam a
 hierarquia normal.
 
+Ao investigar domingos, separe sempre `TIPO_DIA`, intenção e política de
+seleção. `DOMINGO_NORMAL` não significa automaticamente `NORMAL_ROTATION`:
+pode ser `MONTHLY_REPEAT`, `EVERY_MONTH_OBLIGATION` ou `GAP_FILL`. Uma lacuna
+explica por que a data precisa ser preenchida, mas a pessoa deve vir da
+política registrada para aquela intenção, não de uma fila implícita. Para
+comparar a ordem real carregada do BP com a ordem percorrida pelo motor, use
+também `scripts/diagnosticar_domingo_hierarquia.py`.
+
 ## Como reproduzir uma decisão sem escrever nada
 
 Para confirmar uma hipótese, é válido (e preferível) chamar as funções

@@ -105,6 +105,30 @@ def obrigacao_satisfeita_por_intencao(intent: AllocationIntent) -> str:
     return ""
 
 
+def tipo_dia_domingo(*, slot_e_ceia: bool, dia_da_semana: str) -> str:
+    if eh_domingo(dia_da_semana):
+        return "CEIA" if slot_e_ceia else "DOMINGO_NORMAL"
+    return dia_da_semana
+
+
+def politica_selecao_por_intencao(intent: AllocationIntent) -> str:
+    if intent == AllocationIntent.CEIA:
+        return "CEIA_CYCLE"
+    if intent in {AllocationIntent.NORMAL_ROTATION, AllocationIntent.PREFERRED_WEEK}:
+        return "SUNDAY_HIERARCHY"
+    if intent in {AllocationIntent.MONTHLY_REPEAT, AllocationIntent.EVERY_MONTH_OBLIGATION}:
+        return "MONTHLY_OBLIGATION"
+    if intent == AllocationIntent.GAP_FILL:
+        return "GAP_FILL_EXTRA_HIERARCHY"
+    if intent == AllocationIntent.RESCUE:
+        return "RESCUE_POOL"
+    if intent == AllocationIntent.REORGANIZATION:
+        return "GAP_REORGANIZATION"
+    if intent == AllocationIntent.SYNCHRONIZATION:
+        return "SYNCHRONIZATION"
+    return ""
+
+
 def calcular_cursor_depois(
     cursor_antes: str | None, vencedor: str | None, consome_hierarquia: bool
 ) -> str | None:

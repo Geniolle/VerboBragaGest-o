@@ -111,6 +111,10 @@ Cada script de preenchimento, na prática:
    (`NORMAL_ROTATION`, `MONTHLY_REPEAT`, `EVERY_MONTH_OBLIGATION`, `CEIA`,
    etc.) para que não seja necessário inferir posteriormente por que a pessoa
    entrou.
+   Preserve também a separação entre `TIPO_DIA`, intenção e política de
+   seleção: um `DOMINGO_NORMAL` pode ser rotação normal ou obrigação mensal.
+   `GAP_FILL` explica a lacuna, mas não escolhe por uma fila implícita; use a
+   política de seleção registrada/implementada para aquele tipo de decisão.
 3. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
    base (`N` colaboradores ativos + fecho do mês), mas só a encerra depois de
    `ronda_esta_completa` confirmar que todas as participações-base e

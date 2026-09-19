@@ -135,11 +135,11 @@ roda em 4 fases (implementado em `_alocar_grupo_domingo_ceia_alternada` em
   cronologica, antes de tocar em qualquer slot normal. Usa o filtro de
   elegibilidade (`ceia_alternada=True` + nao repetir `ultimo_vencedor_ceia`)
   e registra a CEIA como uma ocorrencia mensal para `REPETICAO MENSAL`.
-- **Fase 2 -- remove do pool quem ja ganhou CEIA**: quem venceu um slot de
-  CEIA na Fase 1 sai do pool das datas restantes deste ciclo, **exceto**
-  quem ainda tem necessidade mensal restante. A necessidade restante e
-  calculada sobre ocorrencias totais do mes, portanto a propria CEIA ja
-  consome uma das ocorrencias de `REPETICAO MENSAL`.
+- **Fase 2 -- mantém a hierarquia normal completa**: CEIA não cria exclusão
+  global para todas as datas normais da Ronda. A elegibilidade é reavaliada
+  data a data. Se a pessoa fez CEIA no mesmo mês e já atingiu
+  `REPETICAO MENSAL`, ela fica inelegível naquele mês; uma CEIA futura de
+  novembro/dezembro não remove essa pessoa da rotação normal de outubro.
 - **Fase 3 -- uma unica passada pelas datas restantes**: processa as datas
   normais (nao-CEIA) em ordem cronologica, escolhendo por prioridade dentro
   do pool remanescente da Fase 2, respeitando a cota mensal normalmente.
@@ -221,21 +221,22 @@ como autorizacao para ultrapassar `REPETICAO MENSAL`. Na regra atual, se uma
 pessoa tem `REPETICAO MENSAL=1` e ja fez CEIA naquele mes, ela fica inelegivel
 para nova vaga normal de MINISTRO no mesmo mes.
 
-Grupo: Clayton Lopes (P1, `ALOCAR TODOS OS MESES=true`), Patricia Lopes
-(P2), Caio Lima (P3), Ana Lima (P4), Andre Luiz (P5), Suzana Fonseca (P6),
-Davi Fenner (P7) -- todos com `ceia_alternada=true`.
+Grupo: Clayton Lopes (prioridade 1, `ALOCAR TODOS OS MESES=true`), Patricia
+Lopes (prioridade 2), Caio Lima (prioridade 3), Ana Lima (prioridade 4),
+Andre Luiz (prioridade 5), Suzana Fonseca (prioridade 6), Davi Fenner
+(prioridade 7) -- todos com `ceia_alternada=true`.
 
 | Data | Slot | Vencedor | Fase / motivo |
 |---|---|---|---|
-| 04/10 | CEIA | Clayton Lopes (P1) | Fase 1, sem vencedor anterior |
-| 11/10 | normal | Caio Lima (P3) | Fase 3; Clayton pulado (out. ja usado na CEIA) |
-| 18/10 | normal | Ana Lima (P4) | Fase 3, proximo na fila |
-| 25/10 | normal | Andre Luiz (P5) | Fase 3, proximo na fila |
-| 01/11 | CEIA | Patricia Lopes (P2) | Fase 1, Clayton bloqueado (repeticao) |
-| 08/11 | normal | Clayton Lopes (P1, ATM) | Fase 3; volta pq novembro ainda nao usado por ele |
-| 15/11 | normal | Suzana Fonseca (P6) | Fase 3, proximo na fila |
-| 22/11 | normal | Davi Fenner (P7) | Fase 3, esvazia a fila |
-| 29/11 | normal | Patricia Lopes (P2) | exemplo historico da Fase 4; na regra atual, so seria valido se a quota mensal dela ainda nao estivesse satisfeita |
+| 04/10 | CEIA | Clayton Lopes (prioridade 1) | Fase 1, sem vencedor anterior |
+| 11/10 | normal | Patricia Lopes (prioridade 2) | Fase 3; Clayton pulado porque a CEIA ja satisfez sua 1a ocorrencia de outubro |
+| 18/10 | normal | Clayton Lopes (prioridade 1, ATM) | Obrigacao mensal: segunda ocorrencia de outubro; nao move cursor |
+| 25/10 | normal | Caio Lima (prioridade 3) | Retoma a hierarquia depois de Patricia |
+| 01/11 | CEIA | Patricia Lopes (prioridade 2) | Fase 1, Clayton bloqueado (repeticao) |
+| 08/11 | normal | Clayton Lopes (prioridade 1, ATM) | Fase 3; volta pq novembro ainda nao usado por ele |
+| 15/11 | normal | Ana Lima (P4) | Retoma a hierarquia depois de Caio |
+| 22/11 | normal | Clayton Lopes (prioridade 1, ATM) | Obrigacao mensal: segunda ocorrencia de novembro; nao move cursor |
+| 29/11 | normal | Andre Luiz (prioridade 5) | Retoma a hierarquia depois de Ana |
 
 Resultado conceitual: todos os 7 colaboradores aparecem na Ronda, respeitando
 o ciclo de CEIA e a quota mensal vigente. Antes deste algoritmo em fases, um

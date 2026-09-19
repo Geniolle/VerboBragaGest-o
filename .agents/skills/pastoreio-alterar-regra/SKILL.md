@@ -57,6 +57,11 @@ fonte de verdade.
    em `src/pastoreio_orquestrador/domain/domingo/`; para QUARTA-FEIRA,
    preserve os conceitos próprios de tema/nível (P1/P2/P3 não são nomes da
    hierarquia de DOMINGO).
+   Em DOMINGO, não confunda `TIPO_DIA` com motivo/intenção: um
+   `DOMINGO_NORMAL` pode ser rotação normal, repetição mensal, obrigação de
+   todos-os-meses ou lacuna. Se a intenção for `GAP_FILL`, defina também a
+   política de seleção; lacuna não deve criar uma hierarquia paralela
+   implícita.
 6. **Alterar o menor número possível de componentes.** Prefira estender
    uma função existente a duplicá-la. Se a mudança precisar de um novo
    parâmetro em `avaliar_candidatos_para_slot`/`_avaliar_e_escolher`/

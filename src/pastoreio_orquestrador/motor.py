@@ -103,6 +103,8 @@ from pastoreio_orquestrador.domain.domingo.policies import (
     classificar_intencao_mensal,
     classificar_tipo_alocacao,
     obrigacao_satisfeita_por_intencao,
+    politica_selecao_por_intencao,
+    tipo_dia_domingo,
 )
 from pastoreio_orquestrador.models import (
     CandidatoRuntime,
@@ -1007,6 +1009,7 @@ def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) ->
     semana_alternada_penalizada = r.semana_alternada and not respeita_descanso_minimo(
         ctx.ultima_data_usada.get(r.nome), ctx.slot.data
     )
+    obrigacao_mensal_pendente = not cand.is_obrigacao_mensal
     # Rodizio por TEMA (2026-09-10, pedido do Clayton): entra ANTES de
     # PRIORIDADE de proposito -- quem ainda nao fez este tema especifico
     # passa a frente de quem ja fez, mesmo com prioridade pior. E um
@@ -1021,6 +1024,7 @@ def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) ->
 
     return (
         reserva_ceia_penalizada,
+        obrigacao_mensal_pendente,
         rank_semana_preferencial,
         semana_alternada_penalizada,
         contagem_tema,
@@ -1050,6 +1054,7 @@ def ordenar_candidatos(
 class EstadoExecucaoGrupo:
     uso_no_mes: dict[str, int] = field(default_factory=dict)
     uso_por_mes: dict[str, dict[str, int]] = field(default_factory=dict)
+    datas_usadas_por_nome_mes: dict[str, dict[str, list[date]]] = field(default_factory=dict)
     # Participacoes reais ja persistidas em outro processo/coluna que contam
     # para REPETICAO MENSAL do grupo atual. Ex.: CEIA ja escrita na agenda
     # deve contar para a quota mensal de MINISTRO/DOMINGO, mas nao foi
@@ -1153,6 +1158,22 @@ def ocorrencias_ceia_mensais_colaborador(
     return internas + externas
 
 
+def meses_usados_ate_data(
+    estado: EstadoExecucaoGrupo,
+    nome: str,
+    meses_da_ronda: set[str],
+    data_limite: date,
+) -> set[str]:
+    meses: set[str] = set()
+    for mes, datas in estado.datas_usadas_por_nome_mes.get(nome, {}).items():
+        if mes in meses_da_ronda and any(d <= data_limite for d in datas):
+            meses.add(mes)
+    for mes, quantidade in estado.ocorrencias_mensais_externas.get(nome, {}).items():
+        if mes in meses_da_ronda and quantidade > 0:
+            meses.add(mes)
+    return meses
+
+
 def limite_mensal_colaborador(
     regra: RegraColaborador, mapa_limites_mensais: dict[str, int] | None = None
 ) -> int:
@@ -1214,7 +1235,9 @@ def candidato_tem_obrigacao_mensal_pendente(
     limite = limite_mensal_colaborador(regra, mapa_limites_mensais)
     ocorrencias = ocorrencias_mensais_colaborador(estado, regra.nome, slot.mes_key)
     ja_participou_na_ronda = any(
-        quantidade > 0 for quantidade in estado.uso_por_mes.get(regra.nome, {}).values()
+        quantidade > 0
+        for mes, quantidade in estado.uso_por_mes.get(regra.nome, {}).items()
+        if mes <= slot.mes_key
     )
     ja_participou_na_ronda = ja_participou_na_ronda or any(
         quantidade > 0
@@ -1275,7 +1298,9 @@ def _montar_decisao(
         motivo=motivo,
         candidatos_avaliados=candidatos_avaliados,
         runner_up=runner_up,
+        tipo_dia=tipo_dia_domingo(slot_e_ceia=eh_slot_ceia(slot), dia_da_semana=slot.dia_da_semana),
         intent=str(intent),
+        politica_selecao=politica_selecao_por_intencao(intent),
         tipo_alocacao=tipo,
         obrigacao_satisfeita=obrigacao_satisfeita_por_intencao(intent),
         consome_hierarquia=consome_hierarquia,
@@ -1445,10 +1470,7 @@ def avaliar_candidatos_para_slot(
             # participar do seu mes natural dentro da Ronda. Se ja foi alocado em
             # outro mes desta mesma Ronda, fica inelegivel neste mes (nao afeta a CEIA).
             if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
-                meses_usados = {
-                    m for m in meses_da_ronda
-                    if ocorrencias_mensais_colaborador(estado, regra.nome, m) > 0
-                }
+                meses_usados = meses_usados_ate_data(estado, regra.nome, meses_da_ronda, slot.data)
                 if any(m != slot.mes_key for m in meses_usados):
                     continue
         else:
@@ -1458,10 +1480,7 @@ def avaliar_candidatos_para_slot(
             if uso_total >= limite:
                 continue
             if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
-                meses_usados = {
-                    m for m in meses_da_ronda
-                    if ocorrencias_mensais_colaborador(estado, regra.nome, m) > 0
-                }
+                meses_usados = meses_usados_ate_data(estado, regra.nome, meses_da_ronda, slot.data)
                 if any(m != slot.mes_key for m in meses_usados):
                     continue
         if excluse_header is not None and excluse_rows is not None:
@@ -1670,6 +1689,7 @@ def _registrar_vencedor(
     estado.uso_por_mes.setdefault(nome, {})[slot.mes_key] = (
         estado.uso_por_mes.setdefault(nome, {}).get(slot.mes_key, 0) + 1
     )
+    estado.datas_usadas_por_nome_mes.setdefault(nome, {}).setdefault(slot.mes_key, []).append(slot.data)
     estado.ultima_data_usada[nome] = slot.data
     estado.historico_total[nome] = estado.historico_total.get(nome, 0) + 1
     estado.nomes_usados_por_linha_vizinha.setdefault(slot.row_index, set()).add(nome)
@@ -1715,6 +1735,12 @@ def _desregistrar_vencedor(estado: EstadoExecucaoGrupo, nome: str, slot: SlotAge
     uso_meses = estado.uso_por_mes.get(nome)
     if uso_meses is not None and slot.mes_key in uso_meses:
         uso_meses[slot.mes_key] = max(0, uso_meses[slot.mes_key] - 1)
+    datas_meses = estado.datas_usadas_por_nome_mes.get(nome)
+    if datas_meses is not None and slot.mes_key in datas_meses:
+        try:
+            datas_meses[slot.mes_key].remove(slot.data)
+        except ValueError:
+            pass
     if estado.historico_total.get(nome):
         estado.historico_total[nome] -= 1
     estado.nomes_usados_por_linha_vizinha.get(slot.row_index, set()).discard(nome)
@@ -1925,9 +1951,9 @@ def _alocar_grupo_domingo_ceia_alternada(
       Fase 1 - preenche todos os slots do 1o domingo do mes (CEIA) do ciclo
         completo primeiro, em ordem cronologica, antes de qualquer slot
         normal.
-      Fase 2 - remove do pool das datas restantes quem venceu a CEIA nesta
-        passada, exceto quem tem ALOCAR TODOS OS MESES=true ou quem ainda
-        tem repeticao_mensal pendente (cota mensal nao esgotada).
+      Fase 2 - mantem a hierarquia normal completa; CEIA nao cria exclusao
+        global. A elegibilidade em cada data e decidida pela cota mensal
+        daquele mes e pelos filtros obrigatorios.
       Fase 3 - uma unica passada pelas datas restantes (ordem cronologica):
         escolhe por prioridade dentro do pool remanescente, respeitando a
         cota mensal; quem NAO tem ALOCAR TODOS OS MESES sai do pool assim
@@ -1953,7 +1979,6 @@ def _alocar_grupo_domingo_ceia_alternada(
     vizinhos_de_data_por_row = montar_vizinhos_de_data_por_row(slots_ordenados)
 
     # Fase 1: CEIA em todo o ciclo primeiro.
-    vencedores_ceia_sem_atm: set[str] = set()
     for slot in slots_ceia_1o_domingo:
         requisito_tema = requisitos_tema_por_slot.get(slot.row_index)
         vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
@@ -1973,9 +1998,6 @@ def _alocar_grupo_domingo_ceia_alternada(
             )
             continue
         _registrar_vencedor(estado, vencedor, slot)
-        if not vencedor.regra.alocar_todos_os_meses:
-            if quota_mensal_atingida(estado, vencedor.regra, slot.mes_key, mapa_limites_mensais):
-                vencedores_ceia_sem_atm.add(vencedor.nome)
         motivo = "RESGATE" if usou_resgate else "CEIA ALTERNADA"
         decisoes_por_row[slot.row_index] = _montar_decisao(
             estado,
@@ -1988,9 +2010,12 @@ def _alocar_grupo_domingo_ceia_alternada(
             mapa_limites_mensais=mapa_limites_mensais,
         )
 
-    # Fase 2: remove da fila das datas normais quem venceu a CEIA (exceto
-    # ALOCAR TODOS OS MESES=true ou quem ainda tem repeticao_mensal pendente).
-    pool_fase3 = [r for r in regras_grupo if r.nome not in vencedores_ceia_sem_atm]
+    # Fase 2: CEIA nao cria exclusao global na hierarquia normal. A propria
+    # cota mensal (incluindo CEIA no mesmo mes) decide se o vencedor da CEIA
+    # ainda pode concorrer a um domingo normal. Remover todos os vencedores
+    # de CEIA da Ronda inteira fazia uma CEIA futura de novembro/dezembro
+    # tirar a pessoa da rotacao normal de outubro.
+    pool_fase3 = list(regras_grupo)
     nomes_disponiveis_fase3 = {r.nome for r in pool_fase3}
 
     # Fase 3: unica passada pelas datas normais, respeitando a cota mensal.

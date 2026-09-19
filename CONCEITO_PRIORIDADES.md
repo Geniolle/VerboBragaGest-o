@@ -223,6 +223,26 @@ A transição de cursor é centralizada pelo resultado da decisão: somente
 `consome_hierarquia=true` troca a âncora para o vencedor. O último vencedor
 cronológico e a última âncora da hierarquia não são sinónimos.
 
+### Tipo do dia, intenção e política de seleção
+
+Em DOMINGO, `TIPO_DIA` não é sinónimo de motivo da alocação. Um dia pode ser:
+
+- `CEIA`: primeiro domingo do mês tratado pelo ciclo próprio da CEIA.
+- `DOMINGO_NORMAL`: qualquer outro domingo.
+
+Um `DOMINGO_NORMAL` pode existir por intenções diferentes:
+
+- `NORMAL_ROTATION`: escolhe pela política `SUNDAY_HIERARCHY` e consome cursor.
+- `MONTHLY_REPEAT` ou `EVERY_MONTH_OBLIGATION`: escolhe pela política
+  `MONTHLY_OBLIGATION` e não consome cursor.
+- `GAP_FILL`: explica que há uma lacuna a preencher, mas usa uma política
+  explícita (`GAP_FILL_EXTRA_HIERARCHY`). Lacuna não deve criar uma hierarquia
+  paralela implícita nem mover o cursor normal.
+
+Assim, uma lacuna responde "por que esta data precisa ser preenchida"; a
+política de seleção responde "como escolhemos a pessoa". Auditoria e
+diagnósticos devem registrar os dois campos separadamente.
+
 ### Por que isso garante o comportamento de "ALOCAR TODOS OS MESES + preferência = sempre o primeiro escolhido"
 
 Combinando a etapa 1.8 (filtro obrigatório) com a etapa 2.2 (rank 0 sempre

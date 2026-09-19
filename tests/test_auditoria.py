@@ -5,6 +5,7 @@ from pastoreio_orquestrador.auditoria import (
     CABECALHO_AUDITORIA_SEM_INTENCAO,
     construir_linhas_auditoria,
     carregar_registros_auditoria,
+    _header_index,
 )
 from pastoreio_orquestrador.models import DecisaoAlocacao, SlotAgenda
 
@@ -42,35 +43,17 @@ def test_construir_linhas_auditoria_decisao_normal():
         dia_da_semana_grupo="QUARTA-FEIRA",
     )
 
-    assert linhas == [
-        [
-            "run-1",
-            "2026-09-05T10:00:00",
-            "D. MINISTROS/MINISTRO/QUARTA-FEIRA",
-            "D. MINISTROS",
-            "MINISTRO",
-            "QUARTA-FEIRA",
-            "2026-09-16",
-            "QUARTA-FEIRA",
-            "Fé",
-            "P1",
-            "Ana Lima",
-            "",
-            "ALOCAÇÃO NORMAL",
-            "",
-            "ALOCAÇÃO NORMAL",
-            "",
-            "FALSE",
-            "TRUE",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "Caio Lima",
-            "Ana Lima; Caio Lima",
-        ]
-    ]
+    idx = _header_index(CABECALHO_AUDITORIA)
+    linha = linhas[0]
+    assert linha[idx["RUN_ID"]] == "run-1"
+    assert linha[idx["TEMA"]] == "Fé"
+    assert linha[idx["REQUISITO_TEMA"]] == "P1"
+    assert linha[idx["VENCEDOR"]] == "Ana Lima"
+    assert linha[idx["MOTIVO"]] == "ALOCAÇÃO NORMAL"
+    assert linha[idx["CONSOME_HIERARQUIA"]] == "FALSE"
+    assert linha[idx["CONTA_REPETICAO_MENSAL"]] == "TRUE"
+    assert linha[idx["RUNNER_UP"]] == "Caio Lima"
+    assert linha[idx["CANDIDATOS_AVALIADOS"]] == "Ana Lima; Caio Lima"
 
 
 def test_construir_linhas_auditoria_sem_alocacao():
@@ -85,12 +68,13 @@ def test_construir_linhas_auditoria_sem_alocacao():
         [decisao], grupo_label="G", timestamp_execucao="2026-09-05T10:00:00"
     )
 
-    assert linhas[0][10] == ""  # VENCEDOR vazio
-    assert linhas[0][12] == "SEM ALOCAÇÃO"
-    assert linhas[0][16] == "FALSE"
-    assert linhas[0][17] == "FALSE"
-    assert linhas[0][23] == ""  # RUNNER_UP vazio
-    assert linhas[0][24] == ""  # nenhum candidato avaliado
+    idx = _header_index(CABECALHO_AUDITORIA)
+    assert linhas[0][idx["VENCEDOR"]] == ""
+    assert linhas[0][idx["MOTIVO"]] == "SEM ALOCAÇÃO"
+    assert linhas[0][idx["CONSOME_HIERARQUIA"]] == "FALSE"
+    assert linhas[0][idx["CONTA_REPETICAO_MENSAL"]] == "FALSE"
+    assert linhas[0][idx["RUNNER_UP"]] == ""
+    assert linhas[0][idx["CANDIDATOS_AVALIADOS"]] == ""
 
 
 def test_cabecalho_tem_uma_coluna_por_campo():

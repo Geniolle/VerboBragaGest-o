@@ -40,6 +40,11 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   o cursor normal. Repetição mensal, obrigação de `ALOCAR TODOS OS MESES`,
   CEIA, resgate, lacuna e candidatos apenas analisados/rejeitados não movem
   esse cursor.
+- Em DOMINGO, `TIPO_DIA` é separado de motivo/intenção/política de seleção:
+  um `DOMINGO_NORMAL` pode ser `NORMAL_ROTATION`, `MONTHLY_REPEAT`,
+  `EVERY_MONTH_OBLIGATION` ou `GAP_FILL`. `GAP_FILL` explica a existência da
+  vaga, mas só pode escolher pessoa por uma política explícita; não invente
+  uma hierarquia paralela implícita.
 - Regras novas não devem ser implementadas como um `if` solto no motor antes
   de identificar a que conceito do domínio pertencem: elegibilidade,
   obrigação, ranking/hierarquia, intenção da vaga, transição de estado ou

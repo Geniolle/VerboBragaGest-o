@@ -5,6 +5,8 @@ from pastoreio_orquestrador.domain.domingo.policies import (
     classificar_intencao_mensal,
     classificar_tipo_alocacao,
     obrigacao_satisfeita_por_intencao,
+    politica_selecao_por_intencao,
+    tipo_dia_domingo,
 )
 
 
@@ -80,6 +82,8 @@ def test_normal_move_cursor_e_obrigacao_nao_move():
 
     assert normal == AllocationIntent.NORMAL_ROTATION
     assert repeticao == AllocationIntent.MONTHLY_REPEAT
+    assert politica_selecao_por_intencao(normal) == "SUNDAY_HIERARCHY"
+    assert politica_selecao_por_intencao(repeticao) == "MONTHLY_OBLIGATION"
     assert calcular_cursor_depois("P2", "P3", True) == "P3"
     assert calcular_cursor_depois("P2", "P1", False) == "P2"
 
@@ -97,3 +101,9 @@ def test_quarta_nao_gera_intencao_mensal_de_domingo():
     )
 
     assert intent is None
+
+
+def test_tipo_dia_e_independente_da_intencao():
+    assert tipo_dia_domingo(slot_e_ceia=True, dia_da_semana="DOMINGO") == "CEIA"
+    assert tipo_dia_domingo(slot_e_ceia=False, dia_da_semana="DOMINGO") == "DOMINGO_NORMAL"
+    assert politica_selecao_por_intencao(AllocationIntent.GAP_FILL) == "GAP_FILL_EXTRA_HIERARCHY"

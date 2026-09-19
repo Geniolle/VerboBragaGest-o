@@ -26,12 +26,14 @@ CABECALHO_AUDITORIA = [
     "DIA_DA_SEMANA_GRUPO",
     "DATA_SLOT",
     "DIA_DA_SEMANA",
+    "TIPO_DIA",
     "TEMA",
     "REQUISITO_TEMA",
     "VENCEDOR",
     "PRIORIDADE_VENCEDOR",
     "MOTIVO",
     "INTENCAO_ALOCACAO",
+    "POLITICA_SELECAO",
     "TIPO_ALOCACAO",
     "OBRIGACAO_SATISFEITA",
     "CONSOME_HIERARQUIA",
@@ -47,7 +49,7 @@ CABECALHO_AUDITORIA = [
 
 CABECALHO_AUDITORIA_SEM_INTENCAO = [
     col for col in CABECALHO_AUDITORIA
-    if col not in {"INTENCAO_ALOCACAO", "OBRIGACAO_SATISFEITA"}
+    if col not in {"TIPO_DIA", "INTENCAO_ALOCACAO", "POLITICA_SELECAO", "OBRIGACAO_SATISFEITA"}
 ]
 
 
@@ -97,8 +99,10 @@ def _get_auditoria(row: list[str], idx: dict[str, int], col: str) -> str:
     existentes antes da evolucao sao lidos pela posicao do cabecalho legado,
     impedindo que `CONSOME_HIERARQUIA` ou cursor fiquem deslocados.
     """
-    if len(row) == len(CABECALHO_AUDITORIA_SEM_INTENCAO) and col not in {
+    if len(row) <= len(CABECALHO_AUDITORIA_SEM_INTENCAO) and col not in {
+        "TIPO_DIA",
         "INTENCAO_ALOCACAO",
+        "POLITICA_SELECAO",
         "OBRIGACAO_SATISFEITA",
     }:
         legado_idx = _header_index(CABECALHO_AUDITORIA_SEM_INTENCAO)
@@ -168,12 +172,14 @@ def construir_linhas_auditoria(
                 dia_da_semana_grupo,
                 d.slot.data.isoformat(),
                 d.slot.dia_da_semana,
+                d.tipo_dia,
                 d.slot.tema,
                 requisito,
                 d.vencedor or "",
                 "" if prioridade is None else str(prioridade),
                 d.motivo,
                 d.intent,
+                d.politica_selecao,
                 d.tipo_alocacao or d.motivo,
                 d.obrigacao_satisfeita,
                 "TRUE" if d.consome_hierarquia else "FALSE",

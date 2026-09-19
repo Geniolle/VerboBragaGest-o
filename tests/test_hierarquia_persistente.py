@@ -68,28 +68,27 @@ def _agenda(*pares: tuple[date, str]) -> list[list[str]]:
 
 def _audit(*pares: tuple[date, str, bool, str]) -> list[list[str]]:
     rows = [CABECALHO_AUDITORIA]
+    idx = {nome: i for i, nome in enumerate(CABECALHO_AUDITORIA)}
     for data_slot, vencedor, consome, motivo in pares:
-        rows.append([
-            "run",
-            "2026-12-31T10:00:00",
-            f"{DEP}/{FUNCAO}/{DIA}",
-            DEP,
-            FUNCAO,
-            DIA,
-            data_slot.isoformat(),
-            DIA,
-            "",
-            "",
-            vencedor,
-            "",
-            motivo,
-            "NORMAL_ROTATION" if consome else "",
-            "NORMAL" if consome else motivo,
-            "PARTICIPACAO_BASE" if consome else "",
-            "TRUE" if consome else "FALSE",
-            "",
-            vencedor,
-        ])
+        row = [""] * len(CABECALHO_AUDITORIA)
+        row[idx["RUN_ID"]] = "run"
+        row[idx["TIMESTAMP_EXECUCAO"]] = "2026-12-31T10:00:00"
+        row[idx["GRUPO"]] = f"{DEP}/{FUNCAO}/{DIA}"
+        row[idx["DEPARTAMENTO"]] = DEP
+        row[idx["FUNCAO"]] = FUNCAO
+        row[idx["DIA_DA_SEMANA_GRUPO"]] = DIA
+        row[idx["DATA_SLOT"]] = data_slot.isoformat()
+        row[idx["DIA_DA_SEMANA"]] = DIA
+        row[idx["TIPO_DIA"]] = "DOMINGO_NORMAL"
+        row[idx["VENCEDOR"]] = vencedor
+        row[idx["MOTIVO"]] = motivo
+        row[idx["INTENCAO_ALOCACAO"]] = "NORMAL_ROTATION" if consome else ""
+        row[idx["POLITICA_SELECAO"]] = "SUNDAY_HIERARCHY" if consome else ""
+        row[idx["TIPO_ALOCACAO"]] = "NORMAL" if consome else motivo
+        row[idx["OBRIGACAO_SATISFEITA"]] = "PARTICIPACAO_BASE" if consome else ""
+        row[idx["CONSOME_HIERARQUIA"]] = "TRUE" if consome else "FALSE"
+        row[idx["CANDIDATOS_AVALIADOS"]] = vencedor
+        rows.append(row)
     return rows
 
 
@@ -288,6 +287,38 @@ def test_repeticao_mensal_intercalada_nao_move_cursor_outubro():
     assert [d.tipo_alocacao for d in decisoes] == ["NORMAL", "NORMAL", "REPETICAO_MENSAL", "NORMAL"]
     assert [d.consome_hierarquia for d in decisoes] == [True, True, False, True]
     assert estado.cursor_hierarquia == "Caio"
+
+
+def test_ceia_futura_nao_remove_candidato_da_hierarquia_normal_do_mes_anterior():
+    regras = [
+        _regra("P1", 1, ceia=True, repeticao_mensal=2, alocar_todos_os_meses=True),
+        _regra("P2", 2, ceia=True),
+        _regra("P3", 3, ceia=True),
+    ]
+    slots = [
+        _slot(1, date(2026, 10, 4)),
+        _slot(2, date(2026, 10, 11)),
+        _slot(3, date(2026, 10, 18)),
+        _slot(4, date(2026, 10, 25)),
+        _slot(5, date(2026, 11, 1)),
+    ]
+    estado = EstadoExecucaoGrupo()
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"P1": 2, "P2": 1, "P3": 1},
+    )
+
+    assert decisoes[0].vencedor == "P1"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+    assert decisoes[1].vencedor == "P2"
+    assert decisoes[1].tipo_dia == "DOMINGO_NORMAL"
+    assert decisoes[1].intent == "NORMAL_ROTATION"
+    assert decisoes[1].politica_selecao == "SUNDAY_HIERARCHY"
+    assert decisoes[1].consome_hierarquia is True
 
 
 def test_hierarquia_normal_sem_repeticao_avanca_um_a_um():

@@ -98,7 +98,9 @@ class DecisaoAlocacao:
     candidatos_avaliados: list[str] = field(default_factory=list)
     runner_up: str | None = None
     sem_alocacao: bool = False
+    tipo_dia: str = ""
     intent: str = ""
+    politica_selecao: str = ""
     tipo_alocacao: str = ""
     obrigacao_satisfeita: str = ""
     consome_hierarquia: bool = False

@@ -75,6 +75,9 @@ def test_preenchimento_de_lacuna_nao_recoloca_quem_ja_cumpriu_quota_por_ceia():
     assert decisoes[2].sem_alocacao is True
     assert decisoes[3].vencedor == "Y"
     assert decisoes[3].motivo == "PREENCHIMENTO DE LACUNA"
+    assert decisoes[3].tipo_dia == "DOMINGO_NORMAL"
+    assert decisoes[3].intent == "GAP_FILL"
+    assert decisoes[3].politica_selecao == "GAP_FILL_EXTRA_HIERARCHY"
 
 
 def test_ceia_alternada_faz_rodizio_completo_entre_todos_os_elegiveis():

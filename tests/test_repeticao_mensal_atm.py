@@ -59,7 +59,7 @@ def _slot(row_index: int, d: date, dia: str = "DOMINGO", tema: str = "") -> Slot
 # - Cada colaborador aparece 1x
 # ===========================================================================
 def test_cenario_a_oito_colaboradores_sem_atm_repeticao_1():
-    regras = [_regra(f"Colab_{i}", prioridade=i) for i in range(1, 9)]
+    regras = [_regra(f"Colab_{i}", prioridade=i, ceia_alternada=False) for i in range(1, 9)]
 
     # 2 meses: Outubro/2026 (4 domingos) e Novembro/2026 (4 domingos usados)
     slots = [
@@ -436,7 +436,7 @@ def _alocar_dinamico_padrao(regras, slots, estado):
 
 def test_ronda_nao_encerra_com_colaborador_base_pendente():
     regras = [
-        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Ceia", prioridade=4, ceia_alternada=True),
         _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
         _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
         _regra("Apoio", prioridade=3, ceia_alternada=False),
@@ -472,14 +472,14 @@ def test_ronda_nao_encerra_com_colaborador_base_pendente():
         regras, slots_nov + slots_dez, EstadoExecucaoGrupo(), 1, alocar
     )
 
-    assert any("Pendente ainda possui" in evento for evento in resultado.eventos)
+    assert any("Pendente" in evento and "participacao-base pendente" in evento for evento in resultado.eventos)
     assert any(slot.mes_key == "2026-12" for slot in resultado.slots)
     assert resultado.completude.completa is True
 
 
 def test_novo_mes_cria_obrigacao_para_alocar_todos_os_meses():
     regras = [
-        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Ceia", prioridade=4, ceia_alternada=True),
         _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
         _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
         _regra("Apoio", prioridade=3, ceia_alternada=False),

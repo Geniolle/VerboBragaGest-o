@@ -31,10 +31,23 @@ CABECALHO_AUDITORIA = [
     "VENCEDOR",
     "PRIORIDADE_VENCEDOR",
     "MOTIVO",
+    "INTENCAO_ALOCACAO",
     "TIPO_ALOCACAO",
+    "OBRIGACAO_SATISFEITA",
     "CONSOME_HIERARQUIA",
+    "CONTA_REPETICAO_MENSAL",
+    "OCORRENCIAS_MES_ANTES",
+    "OCORRENCIAS_MES_DEPOIS",
+    "LIMITE_MENSAL",
+    "CURSOR_ANTES",
+    "CURSOR_DEPOIS",
     "RUNNER_UP",
     "CANDIDATOS_AVALIADOS",
+]
+
+CABECALHO_AUDITORIA_SEM_INTENCAO = [
+    col for col in CABECALHO_AUDITORIA
+    if col not in {"INTENCAO_ALOCACAO", "OBRIGACAO_SATISFEITA"}
 ]
 
 
@@ -74,6 +87,23 @@ def _get(row: list[str], idx: dict[str, int], col: str) -> str:
     if pos is None or pos >= len(row):
         return ""
     return str(row[pos]).strip()
+
+
+def _get_auditoria(row: list[str], idx: dict[str, int], col: str) -> str:
+    """Le linhas novas e linhas antigas apos evolucao do cabecalho.
+
+    `CLAUDE_LOG_AUDITORIA` e append-only. Quando o cabecalho ganha colunas,
+    linhas antigas podem continuar com menos campos. Nesse caso, campos ja
+    existentes antes da evolucao sao lidos pela posicao do cabecalho legado,
+    impedindo que `CONSOME_HIERARQUIA` ou cursor fiquem deslocados.
+    """
+    if len(row) == len(CABECALHO_AUDITORIA_SEM_INTENCAO) and col not in {
+        "INTENCAO_ALOCACAO",
+        "OBRIGACAO_SATISFEITA",
+    }:
+        legado_idx = _header_index(CABECALHO_AUDITORIA_SEM_INTENCAO)
+        return _get(row, legado_idx, col)
+    return _get(row, idx, col)
 
 
 def _parse_bool(valor: str) -> bool:
@@ -143,8 +173,16 @@ def construir_linhas_auditoria(
                 d.vencedor or "",
                 "" if prioridade is None else str(prioridade),
                 d.motivo,
+                d.intent,
                 d.tipo_alocacao or d.motivo,
+                d.obrigacao_satisfeita,
                 "TRUE" if d.consome_hierarquia else "FALSE",
+                "TRUE" if d.conta_repeticao_mensal else "FALSE",
+                "" if d.ocorrencias_mes_antes is None else str(d.ocorrencias_mes_antes),
+                "" if d.ocorrencias_mes_depois is None else str(d.ocorrencias_mes_depois),
+                "" if d.limite_mensal is None else str(d.limite_mensal),
+                d.cursor_antes or "",
+                d.cursor_depois or "",
                 d.runner_up or "",
                 "; ".join(d.candidatos_avaliados),
             ]
@@ -166,21 +204,21 @@ def carregar_registros_auditoria(
 
     registros: list[RegistroAuditoria] = []
     for row in valores[1:]:
-        grupo = _get(row, idx, "GRUPO")
-        dep = _get(row, idx, "DEPARTAMENTO")
-        fn = _get(row, idx, "FUNCAO")
-        dia = _get(row, idx, "DIA_DA_SEMANA_GRUPO")
+        grupo = _get_auditoria(row, idx, "GRUPO")
+        dep = _get_auditoria(row, idx, "DEPARTAMENTO")
+        fn = _get_auditoria(row, idx, "FUNCAO")
+        dia = _get_auditoria(row, idx, "DIA_DA_SEMANA_GRUPO")
         if dep or fn or dia:
             if dep.upper() != departamento.upper() or fn.upper() != funcao.upper() or dia.upper() != dia_da_semana.upper():
                 continue
         elif not _grupo_legacy_match(grupo, departamento, funcao, dia_da_semana):
             continue
 
-        data_slot = _parse_data_auditoria(_get(row, idx, "DATA_SLOT"))
-        vencedor = _get(row, idx, "VENCEDOR")
+        data_slot = _parse_data_auditoria(_get_auditoria(row, idx, "DATA_SLOT"))
+        vencedor = _get_auditoria(row, idx, "VENCEDOR")
         if data_slot is None or not vencedor:
             continue
-        prioridade_txt = _get(row, idx, "PRIORIDADE_VENCEDOR")
+        prioridade_txt = _get_auditoria(row, idx, "PRIORIDADE_VENCEDOR")
         try:
             prioridade = int(prioridade_txt) if prioridade_txt else None
         except ValueError:
@@ -189,9 +227,9 @@ def carregar_registros_auditoria(
             RegistroAuditoria(
                 data_slot=data_slot,
                 vencedor=vencedor,
-                motivo=_get(row, idx, "MOTIVO"),
-                consome_hierarquia=_parse_bool(_get(row, idx, "CONSOME_HIERARQUIA")),
-                run_id=_get(row, idx, "RUN_ID"),
+                motivo=_get_auditoria(row, idx, "MOTIVO"),
+                consome_hierarquia=_parse_bool(_get_auditoria(row, idx, "CONSOME_HIERARQUIA")),
+                run_id=_get_auditoria(row, idx, "RUN_ID"),
                 prioridade_vencedor=prioridade,
                 departamento=dep,
                 funcao=fn,

@@ -83,6 +83,7 @@ class CandidatoRuntime:
     is_sinc_natural: bool = False
     is_sem_alt_violation: bool = False
     is_zombie_recuperado: bool = False
+    is_obrigacao_mensal: bool = False
 
     @property
     def nome(self) -> str:
@@ -97,9 +98,17 @@ class DecisaoAlocacao:
     candidatos_avaliados: list[str] = field(default_factory=list)
     runner_up: str | None = None
     sem_alocacao: bool = False
+    intent: str = ""
     tipo_alocacao: str = ""
+    obrigacao_satisfeita: str = ""
     consome_hierarquia: bool = False
     prioridade_vencedor: int | None = None
+    conta_repeticao_mensal: bool = False
+    ocorrencias_mes_antes: int | None = None
+    ocorrencias_mes_depois: int | None = None
+    limite_mensal: int | None = None
+    cursor_antes: str | None = None
+    cursor_depois: str | None = None
 
 
 @dataclass

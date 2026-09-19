@@ -32,8 +32,10 @@ filtros obrigatórios, etapa 2 = desempate — ver `CONCEITO_PRIORIDADES.md`):
    data exata do slot em questão. Erros de investigação começam quase
    sempre por comparar o grupo errado.
 2. **Cota mensal/local**: `demanda.mapa_limites_locais` /
-   `estado.uso_no_mes` / `estado.uso_por_mes` — o candidato já usou a cota
-   do mês?
+   `estado.uso_no_mes` / `estado.uso_por_mes` /
+   `estado.ocorrencias_mensais_externas` — o candidato já usou a cota do
+   mês? Em DOMINGO, conte CEIA + MINISTRO para `REPETIÇÃO MENSAL`: uma CEIA
+   já satisfaz uma ocorrência mensal, embora não mova o cursor normal.
 3. **Excluse**: `esta_bloqueado_por_excluse` — o nome do candidato aparece
    em `slot.papeis` ou `slot.assiduidade` sob alguma função declarada em
    `ID_<DEPARTAMENTO>` naquela data? (ler a aba `Excluse` real, coluna
@@ -64,8 +66,10 @@ filtros obrigatórios, etapa 2 = desempate — ver `CONCEITO_PRIORIDADES.md`):
 11. **Resgate**: se ninguém sobreviveu à passada normal, o motor tenta de
     novo com `ignorar_vizinhanca_e_descanso=True` — só quem tem
     `ALOCAR TODOS OS MESES=false` **e** `ALOCAÇÃO EXTRA=true` participa, e
-    aí só Excluse/aniversário/vizinhança ainda bloqueiam (cota, descanso,
-    tema e semana preferencial deixam de bloquear).
+    aí Excluse/aniversário/vizinhança continuam bloqueando. Em DOMINGO,
+    se a quota de `REPETIÇÃO MENSAL` já foi satisfeita por CEIA naquele mês,
+    isso também bloqueia nova vaga normal; CEIA conta para quota mesmo sem
+    consumir cursor.
 12. **SEM ALOCAÇÃO**: confirme que é genuinamente impossível — todo o pool
     elegível (normal + resgate + reorganização de lacuna, se o grupo usa
     CEIA ALTERNADA) foi eliminado por algum filtro da lista acima. Não
@@ -81,7 +85,10 @@ filtros obrigatórios, etapa 2 = desempate — ver `CONCEITO_PRIORIDADES.md`):
     `CONSOME_HIERARQUIA`: somente linhas `TRUE`, confirmadas contra a
     alocação real em `AppAnualGlobal`/`CLAUDE_AppAnualGlobal`, movem o
     cursor da hierarquia normal entre execuções. CEIA, repetição mensal,
-    ATM, resgate e lacuna não movem esse cursor.
+    ATM, resgate e lacuna não movem esse cursor. Para explicar repetição
+    mensal, confira também `CONTA_REPETICAO_MENSAL`,
+    `OCORRENCIAS_MES_ANTES`, `OCORRENCIAS_MES_DEPOIS` e `LIMITE_MENSAL`
+    quando existirem.
 
 ## Investigar continuidade da hierarquia de DOMINGO
 
@@ -98,6 +105,14 @@ mensais, não procure uma variável em memória. Reproduza a reconstrução:
 
 Se auditoria e agenda divergirem, reporte inconsistência em vez de inferir
 o cursor por nome ou prioridade.
+
+Para diagnosticar uma Ronda de DOMINGO sem escrever, use
+`scripts/diagnosticar_cursor_domingo.py`: ele mostra data, tipo de decisão,
+intenção da vaga, obrigação satisfeita, `CONSOME_HIERARQUIA`, cursor
+antes/depois e candidatos avaliados. Lembre que candidato analisado e
+rejeitado não consome cursor; repetição mensal, obrigação de
+`ALOCAR TODOS OS MESES`, CEIA, resgate e lacuna também não avançam a
+hierarquia normal.
 
 ## Como reproduzir uma decisão sem escrever nada
 

@@ -43,18 +43,15 @@ def _slot(row_index: int, d: date) -> SlotAgenda:
     )
 
 
-def test_preenchimento_de_lacuna_nao_repete_o_mesmo_extra_quando_ha_outro_disponivel():
+def test_preenchimento_de_lacuna_nao_recoloca_quem_ja_cumpriu_quota_por_ceia():
     # X (prioridade 1) e Y (prioridade 2) sao os unicos dois candidatos,
     # ambos com ALOCACAO_EXTRA=True. Com so 4 domingos de novembro/2026 e
     # cota de 1/mes cada, a Fase 3 fecha o CEIA (slot 1) com X e o slot 2
     # com Y, esgotando o pool normal -- slots 3 e 4 caem para a Fase 4
     # (PREENCHIMENTO DE LACUNA). Antes da correcao (2026-09-07, pedido do
     # Clayton), a Fase 4 sempre escolhia X (maior prioridade) para as duas
-    # lacunas, repetindo-o dentro do mesmo ciclo mesmo com Y disponivel e
-    # respeitando o descanso minimo. A regra correta e: dentro do mesmo
-    # ciclo, se ha outro colaborador da hierarquia ALOCACAO_EXTRA ainda nao
-    # usado no preenchimento de lacuna, usa o diferente; so repete se nao
-    # sobrar ninguem mais.
+    # lacunas. Com a regra atual, X nao volta porque ja cumpriu a quota pela
+    # CEIA; Y so entra quando nao viola vizinhanca de datas.
     regras = [
         _regra("X", prioridade=1, alocacao_extra=1),
         _regra("Y", prioridade=2, alocacao_extra=1),
@@ -74,8 +71,8 @@ def test_preenchimento_de_lacuna_nao_repete_o_mesmo_extra_quando_ha_outro_dispon
     assert decisoes[0].motivo == "CEIA ALTERNADA"
     assert decisoes[1].vencedor == "Y"
     assert decisoes[1].motivo == "ALOCAÇÃO NORMAL"
-    assert decisoes[2].vencedor == "X"
-    assert decisoes[2].motivo == "PREENCHIMENTO DE LACUNA"
+    assert decisoes[2].vencedor is None
+    assert decisoes[2].sem_alocacao is True
     assert decisoes[3].vencedor == "Y"
     assert decisoes[3].motivo == "PREENCHIMENTO DE LACUNA"
 
@@ -156,21 +153,15 @@ def test_preenchimento_de_lacuna_faz_rodizio_entre_execucoes_com_mesmo_estado():
     assert decisoes_ronda2[2].vencedor == vencedor_lacuna_ronda1
 
 
-def test_preenchimento_de_lacuna_repete_quando_nao_ha_outro_extra_disponivel():
+def test_preenchimento_de_lacuna_nao_repete_unico_extra_quando_quota_foi_cumprida_por_ceia():
     # So um candidato com ALOCACAO_EXTRA=True.
     #
     # CORRECAO 2026-09-07 (mesmo dia, pedido do Clayton -- "a regra da
     # vizinhanca... esse doi e sobre a datas", "SEM ALOCACAO e quando e
     # impossivel alguma alocacao"): antes, a Fase 4 repetia o unico
-    # candidato mesmo em datas consecutivas por falta de alternativa. Agora
-    # a "vizinhanca de datas" (nao repetir em datas CONSECUTIVAS da propria
-    # sequencia do grupo) e um filtro obrigatorio, aplicado mesmo no ultimo
-    # nivel de reorganizacao (grupo inteiro) -- com um UNICO candidato no
-    # grupo inteiro, nao ha ninguem para reorganizar, entao a data
-    # imediatamente seguinte a CEIA (que ele venceu) fica corretamente SEM
-    # ALOCACAO: e genuinamente impossivel alocar ali sem violar a
-    # vizinhanca. A data seguinte (nao mais adjacente a CEIA, ja que a do
-    # meio ficou sem vencedor) volta a aceita-lo normalmente.
+    # candidato mesmo em datas consecutivas por falta de alternativa. Agora,
+    # como a CEIA conta para REPETICAO MENSAL, um unico candidato com cota 1
+    # ja esta satisfeito no primeiro domingo e nao volta nas datas normais.
     regras = [_regra("X", prioridade=1, alocacao_extra=1)]
     slots = [
         _slot(1, date(2026, 11, 1)),
@@ -186,11 +177,11 @@ def test_preenchimento_de_lacuna_repete_quando_nao_ha_outro_extra_disponivel():
     assert decisoes[0].motivo == "CEIA ALTERNADA"
     assert decisoes[1].vencedor is None
     assert decisoes[1].sem_alocacao is True
-    assert decisoes[2].vencedor == "X"
-    assert decisoes[2].motivo == "PREENCHIMENTO DE LACUNA"
+    assert decisoes[2].vencedor is None
+    assert decisoes[2].sem_alocacao is True
 
 
-def test_lacuna_reorganiza_a_ordem_dos_mesmos_colaboradores_quando_hierarquia_restrita_permite():
+def test_lacuna_nao_reorganiza_para_recolocar_quem_ja_cumpriu_quota_por_ceia():
     # Reproduz o cenario real (Andre Luiz/Caio Lima, 22 e 29/11) que motivou
     # a "vizinhanca de datas" (2026-09-07, pedido do Clayton). A hierarquia
     # de PREENCHIMENTO DE LACUNA (X, Y -- ALOCAR_TODOS_OS_MESES=false E
@@ -205,9 +196,9 @@ def test_lacuna_reorganiza_a_ordem_dos_mesmos_colaboradores_quando_hierarquia_re
     # erradamente para o GRUPO INTEIRO -- "era so preciso reorganizar os
     # mesmos colaboradores que tinhas na linha... reordenar os dias daquela
     # rotacao"): em vez de puxar alguem de fora da hierarquia, o motor
-    # REORGANIZA as duas decisoes ja tomadas pela Fase 4: Y passa a cobrir a
-    # 1a lacuna e X a 2a -- os MESMOS dois colaboradores da hierarquia, so
-    # trocando qual data cada um cobre.
+    # Antes a Fase 4 podia reorganizar para recolocar X. Agora X fica
+    # bloqueado porque ja cumpriu a quota pela CEIA; Y cobre a primeira
+    # lacuna e a segunda fica sem alocacao quando Y esta em Excluse.
     regras = [
         _regra("X", prioridade=1, alocacao_extra=1),
         _regra("Y", prioridade=2, alocacao_extra=1),
@@ -244,14 +235,11 @@ def test_lacuna_reorganiza_a_ordem_dos_mesmos_colaboradores_quando_hierarquia_re
     assert decisoes[0].vencedor == "X" and decisoes[0].motivo == "CEIA ALTERNADA"
     assert decisoes[1].vencedor == "Y" and decisoes[1].motivo == "ALOCAÇÃO NORMAL"
     assert decisoes[2].vencedor == "W" and decisoes[2].motivo == "ALOCAÇÃO NORMAL"
-    # Escolha gulosa inicial da Fase 4 seria X nas duas lacunas (maior
-    # prioridade; nenhuma delas e vizinha do proprio uso anterior de Y ou
-    # W), o que violaria a vizinhanca na 2a. A reorganizacao troca: Y cobre
-    # a 1a lacuna (livre ali -- seu vizinho anterior e W, nao ele mesmo) e X
-    # a 2a -- os mesmos dois colaboradores da hierarquia, so em datas
-    # diferentes.
-    assert decisoes[3].vencedor == "Y" and decisoes[3].motivo == "REORGANIZAÇÃO"
-    assert decisoes[4].vencedor == "X" and decisoes[4].motivo == "REORGANIZAÇÃO"
+    # A primeira lacuna ainda pode ser preenchida por Y. Na segunda, Y esta
+    # bloqueado por Excluse e X nao pode voltar porque ja cumpriu a quota
+    # mensal pela CEIA.
+    assert decisoes[3].vencedor == "Y" and decisoes[3].motivo == "PREENCHIMENTO DE LACUNA"
+    assert decisoes[4].vencedor is None and decisoes[4].sem_alocacao is True
 
 
 def test_aniversariante_nao_pode_ser_alocado_no_proprio_dia():

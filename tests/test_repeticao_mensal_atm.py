@@ -7,6 +7,8 @@ from pastoreio_orquestrador.motor import (
     alocar_ronda_dinamica,
     calcular_demanda_base_grupo,
     calcular_demanda_onda_expansiva,
+    necessidade_mensal_restante,
+    ocorrencias_mensais_colaborador,
     ronda_esta_completa,
 )
 from pastoreio_orquestrador.parsing_utils import week_of_month
@@ -623,3 +625,215 @@ def test_ronda_dinamica_nao_entra_em_loop_quando_obrigacao_mensal_e_impossivel()
     assert resultado.completude.completa is False
     assert resultado.diagnostico is not None
     assert "nenhuma participacao-base pendente" in resultado.diagnostico
+
+
+def test_ceia_persistida_conta_para_repeticao_1_e_bloqueia_ministro_normal():
+    regras = [
+        _regra(
+            "ParticipanteCeia",
+            prioridade=1,
+            repeticao_mensal=1,
+            ceia_alternada=True,
+            alocacao_extra=True,
+        ),
+        _regra("ProximoNormal", prioridade=2, repeticao_mensal=1, ceia_alternada=False),
+    ]
+    estado = EstadoExecucaoGrupo(
+        ocorrencias_mensais_externas={"ParticipanteCeia": {"2026-12": 1}},
+        cursor_hierarquia="Anterior",
+    )
+    slot = _slot(2, date(2026, 12, 13))
+
+    decisoes = alocar_grupo(
+        regras,
+        [slot],
+        estado,
+        {"ParticipanteCeia": 10, "ProximoNormal": 10},
+        mapa_limites_mensais={"ParticipanteCeia": 2, "ProximoNormal": 1},
+    )
+
+    assert decisoes[0].vencedor == "ProximoNormal"
+    assert decisoes[0].consome_hierarquia is True
+    assert estado.cursor_hierarquia == "ProximoNormal"
+    assert ocorrencias_mensais_colaborador(estado, "ParticipanteCeia", "2026-12") == 1
+
+
+def test_ceia_da_mesma_ronda_conta_para_repeticao_1_mesmo_com_alocacao_extra():
+    regras = [
+        _regra(
+            "ParticipanteCeia",
+            prioridade=1,
+            repeticao_mensal=1,
+            ceia_alternada=True,
+            alocacao_extra=True,
+        ),
+        _regra("ProximoNormal", prioridade=2, repeticao_mensal=1, ceia_alternada=False),
+    ]
+    estado = EstadoExecucaoGrupo()
+    slots = [_slot(1, date(2026, 12, 6)), _slot(2, date(2026, 12, 13))]
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {"ParticipanteCeia": 10, "ProximoNormal": 10},
+        mapa_limites_mensais={"ParticipanteCeia": 2, "ProximoNormal": 1},
+    )
+
+    assert decisoes[0].vencedor == "ParticipanteCeia"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+    assert decisoes[0].consome_hierarquia is False
+    assert decisoes[1].vencedor == "ProximoNormal"
+    assert decisoes[1].consome_hierarquia is True
+    assert ocorrencias_mensais_colaborador(estado, "ParticipanteCeia", "2026-12") == 1
+
+
+def test_ceia_persistida_com_repeticao_2_permita_uma_normal_e_depois_bloqueia():
+    regras = [
+        _regra("ParticipanteCeia", prioridade=1, repeticao_mensal=2, ceia_alternada=True),
+        _regra("OutroA", prioridade=2, repeticao_mensal=1, ceia_alternada=False),
+        _regra("OutroB", prioridade=3, repeticao_mensal=1, ceia_alternada=False),
+    ]
+    estado = EstadoExecucaoGrupo(
+        ocorrencias_mensais_externas={"ParticipanteCeia": {"2026-12": 1}},
+    )
+    slots = [_slot(2, date(2026, 12, 13)), _slot(3, date(2026, 12, 20))]
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"ParticipanteCeia": 2, "OutroA": 1, "OutroB": 1},
+    )
+
+    assert decisoes[0].vencedor == "ParticipanteCeia"
+    assert decisoes[0].ocorrencias_mes_antes == 1
+    assert decisoes[0].ocorrencias_mes_depois == 2
+    assert decisoes[1].vencedor == "OutroA"
+    assert ocorrencias_mensais_colaborador(estado, "ParticipanteCeia", "2026-12") == 2
+    assert necessidade_mensal_restante(estado, regras[0], "2026-12", {"ParticipanteCeia": 2}) == 0
+
+
+def test_ceia_persistida_com_repeticao_3_deixa_faltar_uma_apos_normal():
+    regra = _regra("ParticipanteCeia", prioridade=1, repeticao_mensal=3, ceia_alternada=True)
+    estado = EstadoExecucaoGrupo(
+        ocorrencias_mensais_externas={"ParticipanteCeia": {"2026-12": 1}},
+    )
+    slot = _slot(2, date(2026, 12, 13))
+
+    decisoes = alocar_grupo(
+        [regra],
+        [slot],
+        estado,
+        {"ParticipanteCeia": 10},
+        mapa_limites_mensais={"ParticipanteCeia": 3},
+    )
+
+    assert decisoes[0].vencedor == "ParticipanteCeia"
+    assert ocorrencias_mensais_colaborador(estado, "ParticipanteCeia", "2026-12") == 2
+    assert necessidade_mensal_restante(estado, regra, "2026-12", {"ParticipanteCeia": 3}) == 1
+
+
+def test_candidato_pulado_por_quota_de_ceia_nao_consumiu_cursor():
+    regras = [
+        _regra("P3QuotaCheia", prioridade=3, repeticao_mensal=1, ceia_alternada=True),
+        _regra("P4Elegivel", prioridade=4, repeticao_mensal=1, ceia_alternada=False),
+    ]
+    estado = EstadoExecucaoGrupo(
+        cursor_hierarquia="P2Ancora",
+        ocorrencias_mensais_externas={"P3QuotaCheia": {"2026-12": 1}},
+    )
+    slot = _slot(2, date(2026, 12, 13))
+
+    decisoes = alocar_grupo(
+        regras,
+        [slot],
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"P3QuotaCheia": 1, "P4Elegivel": 1},
+    )
+
+    assert decisoes[0].vencedor == "P4Elegivel"
+    assert decisoes[0].consome_hierarquia is True
+    assert estado.cursor_hierarquia == "P4Elegivel"
+    assert "P3QuotaCheia" not in estado.hierarquia_consumida_na_ronda
+
+
+def test_ceia_persistida_nao_consumiu_hierarquia_quando_outro_ministro_e_escolhido():
+    regras = [_regra("CeiaExterna", prioridade=1), _regra("Normal", prioridade=2)]
+    estado = EstadoExecucaoGrupo(
+        cursor_hierarquia="CeiaExterna",
+        ocorrencias_mensais_externas={"CeiaExterna": {"2026-12": 1}},
+    )
+
+    decisao = alocar_grupo(
+        regras,
+        [_slot(2, date(2026, 12, 13))],
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"CeiaExterna": 1, "Normal": 1},
+    )[0]
+
+    assert decisao.vencedor == "Normal"
+    assert decisao.consome_hierarquia is True
+    assert estado.cursor_hierarquia == "Normal"
+
+
+def test_ceia_persistida_com_atm_repeticao_2_deixa_necessidade_um():
+    regra = _regra(
+        "MensalTodoMes",
+        prioridade=1,
+        repeticao_mensal=2,
+        alocar_todos_os_meses=True,
+        ceia_alternada=True,
+    )
+    estado = EstadoExecucaoGrupo(
+        ocorrencias_mensais_externas={"MensalTodoMes": {"2026-12": 1}},
+    )
+
+    assert necessidade_mensal_restante(estado, regra, "2026-12", {"MensalTodoMes": 2}) == 1
+
+
+def test_ceia_persistida_com_atm_repeticao_1_satisfaz_obrigacao_mensal():
+    regra = _regra(
+        "MensalTodoMes",
+        prioridade=1,
+        repeticao_mensal=1,
+        alocar_todos_os_meses=True,
+        ceia_alternada=True,
+    )
+    slots = [_slot(1, date(2026, 12, 6))]
+    completude = ronda_esta_completa(
+        [regra],
+        [],
+        slots,
+        ocorrencias_mensais_externas={"MensalTodoMes": {"2026-12": 1}},
+    )
+
+    assert completude.completa is True
+    status = completude.status_por_colaborador[0]
+    assert status.alocacoes_no_mes == 1
+    assert status.necessidade_restante_no_mes == 0
+
+
+def test_quota_cheia_por_ceia_nao_volta_mesmo_se_proximo_tem_outro_bloqueio():
+    regras = [
+        _regra("QuotaCheia", prioridade=1, repeticao_mensal=1, ceia_alternada=True),
+        _regra("BloqueadoSemana", prioridade=2, semana_preferencial=5, ceia_alternada=False),
+        _regra("TerceiroElegivel", prioridade=3, ceia_alternada=False),
+    ]
+    estado = EstadoExecucaoGrupo(
+        ocorrencias_mensais_externas={"QuotaCheia": {"2026-12": 1}},
+    )
+
+    decisao = alocar_grupo(
+        regras,
+        [_slot(2, date(2026, 12, 13))],
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={r.nome: r.cota_base for r in regras},
+    )[0]
+
+    assert decisao.vencedor == "TerceiroElegivel"
+    assert ocorrencias_mensais_colaborador(estado, "QuotaCheia", "2026-12") == 1

@@ -101,6 +101,16 @@ Cada script de preenchimento, na prática:
    `CONSOME_HIERARQUIA=TRUE` confirmadas pela agenda real; CEIA, repetição
    mensal, ATM, resgate e lacuna não movem o cursor. Depois do replay,
    restaure essa âncora persistida antes de calcular a Ronda aberta.
+   Ainda em DOMINGO, carregue as ocorrências de CEIA já persistidas na agenda
+   para a contagem mensal de `REPETIÇÃO MENSAL`: CEIA não consome hierarquia,
+   mas conta como participação mensal do colaborador.
+   Só alocações NORMAIS avançam esse cursor. Repetição mensal, obrigação de
+   `ALOCAR TODOS OS MESES`, CEIA, resgate e lacuna aparecem na escala quando
+   elegíveis, mas não reposicionam a hierarquia normal.
+   O diagnóstico/auditoria deve preservar a intenção da vaga
+   (`NORMAL_ROTATION`, `MONTHLY_REPEAT`, `EVERY_MONTH_OBLIGATION`, `CEIA`,
+   etc.) para que não seja necessário inferir posteriormente por que a pessoa
+   entrou.
 3. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
    base (`N` colaboradores ativos + fecho do mês), mas só a encerra depois de
    `ronda_esta_completa` confirmar que todas as participações-base e
@@ -125,8 +135,8 @@ Nenhum script novo deve chamar métodos de escrita diretamente num objeto
 ## 5. Auditoria
 
 `auditoria.construir_linhas_auditoria` converte cada `DecisaoAlocacao` em
-linha de log (RUN_ID, motivo, prioridade, `CONSOME_HIERARQUIA`, runner-up,
-ordem completa de desempate), gravada de
+linha de log (RUN_ID, motivo, intenção, obrigação satisfeita, prioridade,
+`CONSOME_HIERARQUIA`, runner-up, ordem completa de desempate), gravada de
 forma cumulativa (nunca apaga execuções anteriores) em
 `CLAUDE_LOG_AUDITORIA` via `guard.ensure_worksheet_with_header` +
 `guard.append_rows`. Os scripts de preenchimento já fazem isto — não

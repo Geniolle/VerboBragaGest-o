@@ -9,6 +9,7 @@ import pytest
 
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_emails, carregar_regras_colaboradores,
+    contar_ocorrencias_mensais_por_colaborador,
     validar_cabecalho_bp_algoritimo,
 )
 
@@ -81,3 +82,25 @@ def test_carregar_emails_ignora_linha_sem_email():
     ]
     emails = carregar_emails(valores)
     assert "CULTO DE ORAÇÃO" not in emails
+
+
+def test_contar_ocorrencias_mensais_por_colaborador_lendo_ceia_e_ministro():
+    valores = [
+        ["DATA", "DIA DA SEMANA", "CEIA", "MINISTRO"],
+        ["06/12/2026", "DOMINGO", "Pessoa A", ""],
+        ["13/12/2026", "DOMINGO", "", "Pessoa A"],
+        ["20/12/2026", "DOMINGO", "", "Pessoa B"],
+        ["23/12/2026", "QUARTA-FEIRA", "Pessoa A", "Pessoa A"],
+    ]
+
+    contagem = contar_ocorrencias_mensais_por_colaborador(
+        valores,
+        "DOMINGO",
+        ("CEIA", "MINISTRO"),
+        nomes_validos={"PESSOA A": "Pessoa A", "PESSOA B": "Pessoa B"},
+    )
+
+    assert contagem == {
+        "Pessoa A": {"2026-12": 2},
+        "Pessoa B": {"2026-12": 1},
+    }

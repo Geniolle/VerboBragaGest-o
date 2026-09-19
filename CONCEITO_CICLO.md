@@ -111,6 +111,12 @@ de DOMINGO:
    - Quantidade **TOTAL** de vezes que o colaborador deve aparecer no mês
      aplicável (ex.: `repeticao_mensal = 2` significa 2 alocações totais no mês,
      e NÃO 2 adicionais).
+   - Em DOMINGO, essa contagem total considera as participações reais do
+     colaborador no mês em CEIA e MINISTRO. CEIA não consome a hierarquia normal,
+     mas satisfaz uma ocorrência de `REPETIÇÃO MENSAL`.
+   - A primeira participação natural pode ser uma decisão normal e consumir a
+     hierarquia. Participações adicionais criadas apenas para completar a cota
+     mensal são obrigações, não avanço da fila normal.
 
 2. **`ALOCAR TODOS OS MESES = FALSE`**:
    - O colaborador deve aparecer $R$ vezes **APENAS no mês onde cai a sua vez

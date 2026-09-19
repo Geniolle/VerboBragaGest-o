@@ -32,6 +32,23 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   (`LOG_AUDITORIA`/`CLAUDE_LOG_AUDITORIA`) com `CONSOME_HIERARQUIA=TRUE`.
   Não implemente cursor mensal baseado em variável global, cache local ou
   estado de processo.
+- Em DOMINGO, CEIA e MINISTRO compartilham a contagem de participação mensal
+  para `REPETIÇÃO MENSAL`: uma CEIA já conta como uma ocorrência do mês.
+  Isso não altera a regra anterior de cursor: CEIA continua com ciclo próprio
+  e `CONSOME_HIERARQUIA=FALSE`.
+- Em DOMINGO, só alocação NORMAL efetivamente escolhida pela hierarquia move
+  o cursor normal. Repetição mensal, obrigação de `ALOCAR TODOS OS MESES`,
+  CEIA, resgate, lacuna e candidatos apenas analisados/rejeitados não movem
+  esse cursor.
+- Regras novas não devem ser implementadas como um `if` solto no motor antes
+  de identificar a que conceito do domínio pertencem: elegibilidade,
+  obrigação, ranking/hierarquia, intenção da vaga, transição de estado ou
+  auditoria. Quando tocar DOMINGO, prefira políticas em
+  `domain/domingo/`; quando tocar QUARTA-FEIRA, preserve os conceitos de
+  tema/nível próprios daquele contexto.
+- DOMINGO e QUARTA-FEIRA são contextos distintos. P1/P2/P3 pertencem ao
+  domínio de QUARTA-FEIRA (tema/nível/classificação) e não devem ser usados
+  como nome para a hierarquia numérica de DOMINGO, que é prioridade/ordem.
 - `GRUPOS_VALIDADOS.md` é o registo oficial de quais combinações
   `DEPARTAMENTO###FUNÇÃO###DIA DA SEMANA` já tiveram pelo menos um teste de
   integração real revisado por humano.

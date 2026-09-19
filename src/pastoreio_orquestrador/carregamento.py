@@ -356,6 +356,43 @@ def carregar_compromissos_cruzados(
     return compromissos
 
 
+def contar_ocorrencias_mensais_por_colaborador(
+    agenda_valores: list[list[str]],
+    dia_da_semana: str,
+    colunas_participacao: list[str] | tuple[str, ...],
+    nomes_validos: dict[str, str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """Conta participacoes reais por colaborador+mes na AppAnualGlobal.
+
+    A funcao e deliberadamente parametrizada por colunas: para
+    D. MINISTROS/MINISTRO/DOMINGO, a quota mensal pode considerar a coluna
+    MINISTRO (quando a propria agenda e a fonte unica da simulacao) e a
+    coluna CEIA (quando a CEIA ja foi escrita por seu processo proprio).
+    Auditoria/log nao entram aqui para evitar dupla contagem.
+    """
+    if not agenda_valores:
+        return {}
+    idx = build_header_index(agenda_valores[0])
+    nomes_validos = nomes_validos or {}
+    resultado: dict[str, dict[str, int]] = {}
+    for row in agenda_valores[1:]:
+        dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
+        if dia_da_semana.strip().upper() not in dia:
+            continue
+        data = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
+        if data is None:
+            continue
+        mes = month_key(data)
+        for coluna in colunas_participacao:
+            nome = get(row, idx, coluna).strip()
+            if not nome or nome.upper() == "SEM ALOCAÇÃO":
+                continue
+            nome = nomes_validos.get(nome.upper(), nome)
+            contagem_nome = resultado.setdefault(nome, {})
+            contagem_nome[mes] = contagem_nome.get(mes, 0) + 1
+    return resultado
+
+
 def carregar_aniversarios(valores: list[list[str]]) -> dict[str, date]:
     """Le a aba BP SERVICE e devolve {NOME em maiusculas: data_de_nascimento},
     para o filtro obrigatorio de "nao alocar o aniversariante no proprio dia

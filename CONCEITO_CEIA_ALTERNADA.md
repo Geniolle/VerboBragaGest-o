@@ -78,6 +78,34 @@ Se o grupo tem $N$ colaboradores com CEIA ativa:
   - Fora do 1o domingo de CEIA, `rank_semana_preferencial` tem precedencia total
     sobre `prioridade` (rank 0 > rank 1 > rank 2).
 
+## CEIA, hierarquia normal e REPETICAO MENSAL
+
+CEIA tem ciclo proprio e nao move a hierarquia normal de MINISTRO. Em auditoria,
+uma decisao de CEIA deve aparecer conceitualmente como `CONSOME_HIERARQUIA=false`.
+
+Isso nao significa que CEIA seja invisivel para a contagem mensal. Para DOMINGO,
+uma participacao na CEIA conta como ocorrencia mensal do colaborador para
+`REPETICAO MENSAL`.
+
+Exemplos:
+
+- `REPETICAO MENSAL=1` + CEIA no primeiro domingo: a quota mensal ja esta
+  satisfeita. Se a hierarquia normal chegar nessa pessoa mais tarde no mesmo
+  mes, ela deve ser pulada e nao consome o cursor normal.
+- `REPETICAO MENSAL=2` + CEIA: falta uma ocorrencia naquele mes, respeitando
+  todos os demais filtros.
+- `ALOCAR TODOS OS MESES=true` nao muda essa aritmetica: em cada mes abrangido,
+  a necessidade e de `R` ocorrencias totais, contando CEIA quando houver.
+
+Arquiteturalmente, isto sao duas propriedades diferentes da mesma decisao:
+
+- CEIA tem `CONSOME_HIERARQUIA=false`.
+- CEIA tem `CONTA_REPETICAO_MENSAL=true`.
+
+Nunca use o facto de uma pessoa ter participado na CEIA para atualizar o
+cursor normal de DOMINGO. Da mesma forma, nunca ignore a CEIA ao calcular
+quantas ocorrencias mensais essa pessoa ja possui.
+
 ## Nao confundir com `reserva_ceia_penalizada`
 
 Existe outro mecanismo, mais antigo, em `chave_ordenacao_candidato`
@@ -106,11 +134,12 @@ roda em 4 fases (implementado em `_alocar_grupo_domingo_ceia_alternada` em
   slots de 1o domingo do mes (CEIA) do ciclo completo, em ordem
   cronologica, antes de tocar em qualquer slot normal. Usa o filtro de
   elegibilidade (`ceia_alternada=True` + nao repetir `ultimo_vencedor_ceia`)
-  e a cota mensal normalmente.
+  e registra a CEIA como uma ocorrencia mensal para `REPETICAO MENSAL`.
 - **Fase 2 -- remove do pool quem ja ganhou CEIA**: quem venceu um slot de
   CEIA na Fase 1 sai do pool das datas restantes deste ciclo, **exceto**
-  quem tem `ALOCAR TODOS OS MESES = true` -- esse continua disponivel
-  (ainda precisa aparecer nos outros meses que o ciclo toca).
+  quem ainda tem necessidade mensal restante. A necessidade restante e
+  calculada sobre ocorrencias totais do mes, portanto a propria CEIA ja
+  consome uma das ocorrencias de `REPETICAO MENSAL`.
 - **Fase 3 -- uma unica passada pelas datas restantes**: processa as datas
   normais (nao-CEIA) em ordem cronologica, escolhendo por prioridade dentro
   do pool remanescente da Fase 2, respeitando a cota mensal normalmente.
@@ -123,37 +152,32 @@ roda em 4 fases (implementado em `_alocar_grupo_domingo_ceia_alternada` em
   remanescente daquele slot) sao preenchidas recorrendo a hierarquia de
   colaboradores com `ALOCAR TODOS OS MESES = false` **E**
   `ALOCAÇÃO EXTRA` marcado (corrigido em 2026-09-07, pedido do Clayton: so
-  quem esta explicitamente disponivel para cota extra pode ser puxado alem
-  da cota mensal normal -- nao vale pegar qualquer um so pela prioridade).
-  Isso inclui gente que a Fase 2 tinha removido (ex.: quem ganhou CEIA),
-  desde que tenha `ALOCAÇÃO EXTRA`. Ignora a cota mensal e a cota total do
-  periodo (na implementacao: passa `mapa_limites_mensais=None` e um teto
-  artificialmente alto para `mapa_limites_locais` nesta fase). Colaboradores
-  com `ALOCAR TODOS OS MESES=true` nunca entram nesse preenchimento de
-  lacunas.
+  quem esta explicitamente disponivel para cota extra pode ser considerado
+  para lacunas -- nao vale pegar qualquer um so pela prioridade). Mesmo nessa
+  fase, um domingo normal nao deve recolocar alguem que ja satisfez
+  `REPETICAO MENSAL` por causa de CEIA no mesmo mes. Colaboradores com
+  `ALOCAR TODOS OS MESES=true` nunca entram nesse preenchimento de lacunas.
 
-  **Atencao -- interacao com o resgate (2026-09-07):** como o resgate
-  (`ignorar_vizinhanca_e_descanso=True`, ver secao "Resgate" abaixo) agora
-  tambem ignora a cota mensal, a propria Fase 3 pode fechar um buraco
-  sozinha (usando quem ainda sobra no pool reduzido, mesmo com a cota
-  daquele mes ja estourada) ANTES de a Fase 4 ser sequer consultada. A Fase
+  **Atencao -- interacao com o resgate (2026-09-07):** o resgate flexibiliza
+  a cota local/capacidade do periodo, mas nao deve recolocar como MINISTRO
+  normal quem ja completou `REPETICAO MENSAL` por CEIA no mesmo mes. A Fase
   4 so entra em jogo quando o pool da Fase 3 fica **totalmente vazio** para
-  aquele slot (nenhum candidato remanescente, nem para resgate) -- nao
-  quando so a cota estava impedindo.
+  aquele slot (nenhum candidato remanescente, nem para resgate).
 
 ## Resgate (dentro de qualquer fase) -- corrigido em 2026-09-07
 
 Sempre que a avaliacao normal de um slot (`avaliar_candidatos_para_slot`
 com `ignorar_vizinhanca_e_descanso=False`) nao deixa ninguem elegivel, o
 motor tenta de novo com `ignorar_vizinhanca_e_descanso=True`. Esse modo de
-resgate ignora:
+resgate flexibiliza:
 
 - conflito de vizinhanca (mesmo colaborador numa linha vizinha);
 - descanso minimo de 7 dias;
-- **cota mensal** (correcao de 2026-09-07, pedido do Clayton -- antes o
-  resgate ainda respeitava a cota, o que podia deixar um slot `SEM
-  ALOCAÇÃO` mesmo quando so havia UM candidato possivel, so que com a cota
-  do mes ja usada).
+- cota local/capacidade do periodo.
+
+Mas, em DOMINGO, se a pessoa ja atingiu `REPETICAO MENSAL` por uma ocorrencia
+de CEIA, o resgate nao deve recoloca-la como MINISTRO normal no mesmo mes
+apenas por causa de `ALOCAÇÃO EXTRA`.
 
 O resgate continua respeitando `Excluse`, aniversario (ver secao abaixo) e
 compatibilidade de tema. So marca `SEM ALOCAÇÃO` se, mesmo ignorando
@@ -189,11 +213,17 @@ comparacao nunca dava verdadeira, entao a excecao nunca disparava de fato,
 e o tema podia acabar bloqueando candidatos tambem aos domingos. O criterio
 certo depende so do dia da semana, nao da funcao/departamento.
 
-### Exemplo real validado (Ronda 1, D. MINISTROS/MINISTRO/DOMINGO, 04/10/2026 a 29/11/2026)
+### Exemplo historico da ordem em fases
+
+O exemplo abaixo documenta a motivacao original da ordem em fases: preencher
+CEIA primeiro, depois as datas normais, depois lacunas. Ele nao deve ser lido
+como autorizacao para ultrapassar `REPETICAO MENSAL`. Na regra atual, se uma
+pessoa tem `REPETICAO MENSAL=1` e ja fez CEIA naquele mes, ela fica inelegivel
+para nova vaga normal de MINISTRO no mesmo mes.
 
 Grupo: Clayton Lopes (P1, `ALOCAR TODOS OS MESES=true`), Patricia Lopes
 (P2), Caio Lima (P3), Ana Lima (P4), Andre Luiz (P5), Suzana Fonseca (P6),
-Davi Fenner (P7) -- todos com `ceia_alternada=true`, cota de 1/mes cada.
+Davi Fenner (P7) -- todos com `ceia_alternada=true`.
 
 | Data | Slot | Vencedor | Fase / motivo |
 |---|---|---|---|
@@ -205,10 +235,10 @@ Davi Fenner (P7) -- todos com `ceia_alternada=true`, cota de 1/mes cada.
 | 08/11 | normal | Clayton Lopes (P1, ATM) | Fase 3; volta pq novembro ainda nao usado por ele |
 | 15/11 | normal | Suzana Fonseca (P6) | Fase 3, proximo na fila |
 | 22/11 | normal | Davi Fenner (P7) | Fase 3, esvazia a fila |
-| 29/11 | normal | Patricia Lopes (P2) | fila da Fase 3 esgotada -> Fase 4 (hierarquia ATM=false, ignora cota mensal) |
+| 29/11 | normal | Patricia Lopes (P2) | exemplo historico da Fase 4; na regra atual, so seria valido se a quota mensal dela ainda nao estivesse satisfeita |
 
-Resultado: todos os 7 colaboradores aparecem (Clayton 2x, Patricia 2x,
-Caio/Ana/Andre/Suzana/Davi 1x cada). Antes deste algoritmo em fases, um
+Resultado conceitual: todos os 7 colaboradores aparecem na Ronda, respeitando
+o ciclo de CEIA e a quota mensal vigente. Antes deste algoritmo em fases, um
 processamento puramente cronologico com desempate so por prioridade deixava
 Suzana e Davi (as prioridades mais baixas) de fora para sempre, porque
 sempre sobrava alguem de prioridade menor com cota livre antes deles em

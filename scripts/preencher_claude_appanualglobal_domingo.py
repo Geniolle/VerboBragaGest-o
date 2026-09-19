@@ -58,6 +58,7 @@ from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
     carregar_compromissos_cruzados, carregar_emails, carregar_excluse_matriz,
     carregar_regras_colaboradores, carregar_zumbis_prioritarios,
+    contar_ocorrencias_mensais_por_colaborador,
     extrair_assiduidade_da_linha, extrair_papeis_da_linha, get,
 )
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
@@ -131,6 +132,12 @@ def main() -> None:
             nomes_vistos.add(r.nome)
             grupo.append(r)
     regras_por_nome = {r.nome.strip().upper(): r for r in grupo}
+    ocorrencias_ceia_persistida = contar_ocorrencias_mensais_por_colaborador(
+        agenda_raw,
+        DIA,
+        ("CEIA",),
+        nomes_validos={nome: regra.nome for nome, regra in regras_por_nome.items()},
+    )
 
     bp_log = carregar_bp_log(bp_log_raw)
     zumbis = carregar_zumbis_prioritarios(bp_log, DEPARTAMENTO, FUNCAO)
@@ -254,6 +261,7 @@ def main() -> None:
     estado.cursor_hierarquia_referencia = cursor.ancora
     estado.cursor_hierarquia_referencia_fixada = True
     estado.hierarquia_consumida_na_ronda.clear()
+    estado.ocorrencias_mensais_externas = ocorrencias_ceia_persistida
     print(f"Ronda candidata inicial: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 

@@ -69,6 +69,11 @@ por completo — ele nem chega na cascata de desempate:
    - `REPETIÇÃO MENSAL` ($R$): total de vezes que o colaborador deve aparecer no
      mês aplicável (`cota_base = max(1, repeticao_mensal)`). Se já atingiu a cota do
      mês, fica fora.
+   - Em **DOMINGO**, a contagem mensal cruza as participações reais de CEIA e
+     MINISTRO. A CEIA não move a hierarquia normal, mas conta como uma ocorrência
+     do mês para `REPETIÇÃO MENSAL`. Assim, `REPETIÇÃO MENSAL = 1` + CEIA no mês
+     deixa a quota mensal satisfeita; `REPETIÇÃO MENSAL = 2` + CEIA deixa faltar
+     uma ocorrência.
    - Em **DOMINGO**, se `ALOCAR TODOS OS MESES = False`: o colaborador só pode
      participar do seu mês natural dentro da Ronda. Se já foi alocado em outro mês
      desta mesma Ronda, fica inelegível neste mês (não afeta slots de CEIA, que
@@ -160,12 +165,20 @@ Consome (`CONSOME_HIERARQUIA=TRUE`):
 
 Não consome (`CONSOME_HIERARQUIA=FALSE`):
 
-- CEIA ALTERNADA, que tem ciclo próprio;
+- CEIA ALTERNADA, que tem ciclo próprio, embora conte para a quota mensal de
+  `REPETIÇÃO MENSAL`;
 - repetição mensal adicional;
 - alocação adicional causada por `ALOCAR TODOS OS MESES`;
 - resgate;
 - preenchimento/reorganização de lacuna;
 - `SEM ALOCAÇÃO`.
+
+A fila normal usa sempre o cursor normal atual. Quando uma pessoa entra apenas
+para cumprir `REPETIÇÃO MENSAL` ou `ALOCAR TODOS OS MESES`, essa decisão é
+uma obrigação mensal: ela pode aparecer na escala e contar para a quota do mês,
+mas não altera o cursor. Um candidato analisado e rejeitado por quota, CEIA,
+Excluse, aniversário, descanso, vizinhança ou qualquer outro filtro também não
+é consumido.
 
 ### Como a próxima execução começa
 
@@ -189,6 +202,26 @@ Prioridades não precisam ser sequenciais. Para `1, 3, 7, 10`, se a última
 âncora atual é prioridade `3`, a próxima tentativa é prioridade `7`, não
 `4`. Se a última âncora for o último elemento, a próxima tentativa volta ao
 primeiro.
+
+## Intenção da vaga e transição de estado
+
+O motor deve saber **por que a vaga existe** antes de tratar essa decisão
+como avanço da hierarquia. Para DOMINGO, a arquitetura usa uma intenção
+equivalente a:
+
+- `NORMAL_ROTATION`: vaga da fila normal; pode mover o cursor.
+- `MONTHLY_REPEAT`: vaga para completar `REPETIÇÃO MENSAL`; não move cursor.
+- `EVERY_MONTH_OBLIGATION`: vaga para cumprir `ALOCAR TODOS OS MESES`; não
+  move cursor.
+- `CEIA`: primeiro domingo pelo ciclo próprio da CEIA; não move cursor, mas
+  conta para a quota mensal.
+- `RESCUE`, `GAP_FILL`, `REORGANIZATION`, `SYNCHRONIZATION`: decisões de
+  exceção/infraestrutura; não devem ser confundidas com avanço normal da
+  hierarquia.
+
+A transição de cursor é centralizada pelo resultado da decisão: somente
+`consome_hierarquia=true` troca a âncora para o vencedor. O último vencedor
+cronológico e a última âncora da hierarquia não são sinónimos.
 
 ### Por que isso garante o comportamento de "ALOCAR TODOS OS MESES + preferência = sempre o primeiro escolhido"
 

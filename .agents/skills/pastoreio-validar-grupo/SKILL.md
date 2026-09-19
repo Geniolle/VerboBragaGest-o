@@ -47,6 +47,8 @@ automaticamente só porque um script terminou sem lançar exceção:
    aniversário e vizinhança daquele grupo especificamente. Casos de
    `SEM ALOCAÇÃO` foram confirmados como genuinamente impossíveis (ver
    `pastoreio-investigar-alocacao`), não como bug.
+   Para grupos de DOMINGO, confira também se a auditoria registra a intenção
+   da vaga e se apenas decisões normais movem o cursor da hierarquia.
 6. **Testes relevantes passaram** — `uv run pytest`, incluindo qualquer
    teste específico desse grupo/regra (ex.: `test_fase0_temas.py` para
    grupos QUARTA-FEIRA com tema, `test_ceia_alternada.py` para grupos

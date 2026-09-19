@@ -45,6 +45,18 @@ fonte de verdade.
    qualquer mudança nesse fluxo precisa preservar a reconstrução do cursor
    por histórico persistido (agenda + auditoria), nunca por variável global,
    cache local ou estado de processo.
+   Também preserve a separação entre cursor e quota mensal: CEIA tem ciclo
+   próprio e `CONSOME_HIERARQUIA=FALSE`, mas conta como ocorrência mensal
+   para `REPETIÇÃO MENSAL` no contexto DOMINGO/MINISTRO.
+   A fila normal deve usar o cursor normal atual; obrigações mensais
+   (`REPETIÇÃO MENSAL` e `ALOCAR TODOS OS MESES`) não podem reposicionar esse
+   cursor. Candidato só analisado/rejeitado também não é consumido.
+   Antes de adicionar qualquer condição nova ao motor, identifique se a regra
+   pertence a elegibilidade, obrigação, ranking/hierarquia, intenção da vaga,
+   transição de estado ou auditoria. Para DOMINGO, prefira políticas pequenas
+   em `src/pastoreio_orquestrador/domain/domingo/`; para QUARTA-FEIRA,
+   preserve os conceitos próprios de tema/nível (P1/P2/P3 não são nomes da
+   hierarquia de DOMINGO).
 6. **Alterar o menor número possível de componentes.** Prefira estender
    uma função existente a duplicá-la. Se a mudança precisar de um novo
    parâmetro em `avaliar_candidatos_para_slot`/`_avaliar_e_escolher`/
@@ -61,7 +73,8 @@ fonte de verdade.
    correto, não o apague silenciosamente).
    Se a mudança toca DOMINGO, inclua cobertura de `CONSOME_HIERARQUIA`
    quando a decisão pode ser CEIA, repetição mensal, ATM, resgate, lacuna
-   ou alocação normal.
+   ou alocação normal. Se a regra toca `REPETIÇÃO MENSAL`, cubra também a
+   contagem conjunta CEIA + MINISTRO no mês.
 8. **Rodar a suite completa** (`uv run pytest`) — nunca considere a tarefa
    terminada só porque o código compila ou porque o teste novo passa
    isoladamente. Investigue qualquer falha, mesmo em teste aparentemente

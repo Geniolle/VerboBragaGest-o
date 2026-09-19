@@ -15,7 +15,15 @@ from pastoreio_orquestrador.motor import EstadoExecucaoGrupo, alocar_grupo
 DEP, FUNCAO, DIA, COLUNA = "D. MINISTROS", "MINISTRO", "DOMINGO", "MINISTRO"
 
 
-def _regra(nome: str, prioridade: int, *, ceia: bool = False, semana: int = 0) -> RegraColaborador:
+def _regra(
+    nome: str,
+    prioridade: int,
+    *,
+    ceia: bool = False,
+    semana: int = 0,
+    repeticao_mensal: int = 1,
+    alocar_todos_os_meses: bool = False,
+) -> RegraColaborador:
     return RegraColaborador(
         id_table=nome,
         nome=nome,
@@ -23,8 +31,8 @@ def _regra(nome: str, prioridade: int, *, ceia: bool = False, semana: int = 0) -
         funcao=FUNCAO,
         dia_da_semana=DIA,
         prioridade=prioridade,
-        repeticao_mensal=1,
-        alocar_todos_os_meses=False,
+        repeticao_mensal=repeticao_mensal,
+        alocar_todos_os_meses=alocar_todos_os_meses,
         semana_preferencial=semana,
         ceia_alternada=ceia,
         semana_alternada=False,
@@ -75,7 +83,9 @@ def _audit(*pares: tuple[date, str, bool, str]) -> list[list[str]]:
             vencedor,
             "",
             motivo,
+            "NORMAL_ROTATION" if consome else "",
             "NORMAL" if consome else motivo,
+            "PARTICIPACAO_BASE" if consome else "",
             "TRUE" if consome else "FALSE",
             "",
             vencedor,
@@ -248,3 +258,94 @@ def test_novo_estado_sem_memoria_reconstroi_cursor_dos_dados_persistidos():
     assert novo_estado.hierarquia_consumida_na_ronda == {"P3"}
     assert decisao.vencedor == "P3"
     assert decisao.consome_hierarquia is True
+
+
+def test_repeticao_mensal_intercalada_nao_move_cursor_outubro():
+    regras = [
+        _regra("Clayton", 1, repeticao_mensal=2),
+        _regra("Patricia", 2),
+        _regra("Caio", 3),
+        _regra("Pessoa D", 4),
+        _regra("Andre", 5),
+    ]
+    slots = [
+        _slot(1, date(2026, 10, 4)),
+        _slot(2, date(2026, 10, 11)),
+        _slot(3, date(2026, 10, 18)),
+        _slot(4, date(2026, 10, 25)),
+    ]
+    estado = EstadoExecucaoGrupo()
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"Clayton": 2, "Patricia": 1, "Caio": 1, "Pessoa D": 1, "Andre": 1},
+    )
+
+    assert [d.vencedor for d in decisoes] == ["Clayton", "Patricia", "Clayton", "Caio"]
+    assert [d.tipo_alocacao for d in decisoes] == ["NORMAL", "NORMAL", "REPETICAO_MENSAL", "NORMAL"]
+    assert [d.consome_hierarquia for d in decisoes] == [True, True, False, True]
+    assert estado.cursor_hierarquia == "Caio"
+
+
+def test_hierarquia_normal_sem_repeticao_avanca_um_a_um():
+    regras = [_regra("P1", 1), _regra("P2", 2), _regra("P3", 3), _regra("P4", 4)]
+    slots = [
+        _slot(1, date(2026, 10, 4)),
+        _slot(2, date(2026, 10, 11)),
+        _slot(3, date(2026, 10, 18)),
+        _slot(4, date(2026, 10, 25)),
+    ]
+    estado = EstadoExecucaoGrupo()
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={r.nome: 1 for r in regras},
+    )
+
+    assert [d.vencedor for d in decisoes] == ["P1", "P2", "P3", "P4"]
+    assert [d.consome_hierarquia for d in decisoes] == [True, True, True, True]
+    assert estado.cursor_hierarquia == "P4"
+
+
+def test_duas_repeticoes_intercaladas_nao_alteram_sequencia_normal():
+    regras = [
+        _regra("P1", 1, repeticao_mensal=3),
+        _regra("P2", 2),
+        _regra("P3", 3),
+        _regra("P4", 4),
+    ]
+    slots = [
+        _slot(1, date(2026, 3, 1)),
+        _slot(2, date(2026, 3, 8)),
+        _slot(3, date(2026, 3, 15)),
+        _slot(4, date(2026, 3, 22)),
+        _slot(5, date(2026, 3, 29)),
+        _slot(6, date(2026, 4, 5)),
+    ]
+    estado = EstadoExecucaoGrupo()
+
+    decisoes = alocar_grupo(
+        regras,
+        slots,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={"P1": 3, "P2": 1, "P3": 1, "P4": 1},
+    )
+
+    assert [d.vencedor for d in decisoes] == ["P1", "P2", "P1", "P3", "P1", "P4"]
+    assert [d.tipo_alocacao for d in decisoes] == [
+        "NORMAL",
+        "NORMAL",
+        "REPETICAO_MENSAL",
+        "NORMAL",
+        "REPETICAO_MENSAL",
+        "NORMAL",
+    ]
+    assert [d.consome_hierarquia for d in decisoes] == [True, True, False, True, False, True]
+    assert estado.cursor_hierarquia == "P4"

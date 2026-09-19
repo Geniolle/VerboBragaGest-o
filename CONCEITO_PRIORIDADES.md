@@ -65,8 +65,16 @@ por completo — ele nem chega na cascata de desempate:
 1. **CEIA ALTERNADA** (só no 1º domingo do mês em DOMINGO): quem tem
    `ceia_alternada=False`, ou já participou no ciclo atual da CEIA, é excluído.
    Ver [[CONCEITO_CEIA_ALTERNADA]].
-2. **Cota mensal/local**: já usou a cota do mês (`cota_base`, ou o limite
-   calculado pela onda expansiva)? Fora.
+2. **Cota mensal / REPETIÇÃO MENSAL e ALOCAR TODOS OS MESES**:
+   - `REPETIÇÃO MENSAL` ($R$): total de vezes que o colaborador deve aparecer no
+     mês aplicável (`cota_base = max(1, repeticao_mensal)`). Se já atingiu a cota do
+     mês, fica fora.
+   - Em **DOMINGO**, se `ALOCAR TODOS OS MESES = False`: o colaborador só pode
+     participar do seu mês natural dentro da Ronda. Se já foi alocado em outro mês
+     desta mesma Ronda, fica inelegível neste mês (não afeta slots de CEIA, que
+     possuem ciclo próprio de rotação).
+   - Se `ALOCAR TODOS OS MESES = True`: participa em todos os meses da Ronda,
+     com a cota de $R$ vezes em cada mês.
 3. **Excluse**: bloqueio explícito cadastrado na aba `Excluse` para
    aquele NOME + DEPARTAMENTO + FUNÇÃO + data. Fora.
 4. **Aniversário**: dia/mês da data bate com a data de nascimento? Fora.

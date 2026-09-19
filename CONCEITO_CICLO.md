@@ -77,32 +77,40 @@ O Ronda 2 comeca limpo no primeiro domingo de dezembro/2026 e teria a
 mesma logica: 7 datas de rotacao (06/12 a 17/01) + 2 datas extras para
 fechar janeiro (24/01 e 31/01) = 9 datas completas.
 
-## Campo ALOCAR TODOS OS MESES
+## Campos REPETIÇÃO MENSAL e ALOCAR TODOS OS MESES
 
-Antes de alocar os colaboradores dentro das datas do ciclo, verifique o
-campo `ALOCAR TODOS OS MESES` de cada `RegraColaborador` (coluna em
-`BP ALGORITIMO`):
+A combinação de `REPETIÇÃO MENSAL` ($R$) e `ALOCAR TODOS OS MESES` (ATM) define
+a quantidade exata de alocações necessárias dentro de uma Ronda (ciclo completo)
+de DOMINGO:
 
-- `TRUE`: esse colaborador **precisa aparecer em toda data-mes** que o
-  ciclo tocar.
-- `FALSE`: esse colaborador entra na rotacao normal, por ordem de
-  `PRIORIDADE NA ALOCAÇÃO` (numero menor = maior prioridade, aloca primeiro).
+1. **`REPETIÇÃO MENSAL` ($R$)**:
+   - Quantidade **TOTAL** de vezes que o colaborador deve aparecer no mês
+     aplicável (ex.: `repeticao_mensal = 2` significa 2 alocações totais no mês,
+     e NÃO 2 adicionais).
 
-**Erro ja cometido aqui (corrigido em 2026-09-05, apontado pelo Clayton):**
-`ALOCAR TODOS OS MESES=true` **NAO significa** "forcar esse colaborador na
-primeira vaga de cada mes novo, interrompendo a rotacao normal". Fazer isso
-empurra todo mundo pra tras sem necessidade.
+2. **`ALOCAR TODOS OS MESES = FALSE`**:
+   - O colaborador deve aparecer $R$ vezes **APENAS no mês onde cai a sua vez
+     natural na Ronda**.
+   - **NÃO deve aparecer em outros meses** abrangidos pela mesma Ronda.
+   - Demanda gerada: $R \times 1 = R$ alocações no período da Ronda.
+   - *Exemplo:* 8 colaboradores em 2 meses (4 domingos cada). Colaborador X tem
+     `repeticao = 2, ATM = False`. Vez natural no Mês A.
+     Demanda = 8 base + 1 adicional = 9 alocações. X aparece 2x no Mês A e 0x no Mês B.
 
-O jeito certo:
-1. Rode a rotacao pura por ordem de prioridade em **todas** as datas do
-   ciclo completo, com "volta ao topo da fila" (wraparound) quando a fila
-   de prioridade se esgota antes das datas acabarem.
-2. So DEPOIS verifique: cada colaborador com `ALOCAR TODOS OS MESES=true`
-   caiu em pelo menos 1 data de cada mes que o ciclo toca?
-   - Se sim (a rotacao natural com wraparound ja resolveu sozinha), nao
-     mexa em mais nada.
-   - Se nao, so ai insira esse colaborador na vaga que falta naquele mes,
-     empurrando quem a rotacao pura colocaria ali para a proxima vaga livre.
+3. **`ALOCAR TODOS OS MESES = TRUE`**:
+   - O colaborador deve aparecer em **TODOS os meses** abrangidos pela Ronda.
+   - Em **CADA mês**, deve aparecer $R$ vezes.
+   - Demanda gerada: $R \times \text{meses\_tocados}$ alocações no período da Ronda.
+   - *Exemplo:* 8 colaboradores em 2 meses (4 domingos cada). Colaborador X tem
+     `repeticao = 2, ATM = True`.
+     Demanda = 8 base + 3 adicionais = 11 alocações. X aparece 2x no Mês A e 2x no Mês B (4 alocações no total).
+
+4. **Demanda vs Datas da Ronda**:
+   - A demanda (ex.: 9 ou 11) é a quantidade de alocações necessárias para cumprir
+     as cotas do grupo.
+   - As datas do calendário da Ronda são delimitadas pela rotação base de $N$
+     colaboradores ativos + extensão para fechamento completo do mês
+     (`delimitar_uma_ronda`), sem quebrar meses ao meio.
 
 No grupo D. MINISTROS/MINISTRO/DOMINGO, **Clayton Lopes** e o unico com
 `ALOCAR TODOS OS MESES = TRUE` (prioridade 1). No Ronda 1 (9 datas,

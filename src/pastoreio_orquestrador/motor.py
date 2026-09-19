@@ -192,6 +192,22 @@ class ResultadoDemanda:
     mapa_limites_mensais: dict[str, int] = field(default_factory=dict)
 
 
+def calcular_demanda_base_grupo(
+    candidatos: list[RegraColaborador],
+    meses_tocados: int = 1,
+) -> int:
+    """Calcula a demanda base de alocacoes necessarias para o grupo:
+    - Para quem tem ALOCAR TODOS OS MESES = True: repeticao_mensal * meses_tocados
+    - Para quem tem ALOCAR TODOS OS MESES = False: repeticao_mensal * 1 (apenas no mes natural)
+    """
+    total = 0
+    for c in candidatos:
+        cota = max(1, c.repeticao_mensal)
+        mult = max(1, meses_tocados) if c.alocar_todos_os_meses else 1
+        total += cota * mult
+    return total
+
+
 def calcular_demanda_onda_expansiva(
     candidatos: list[RegraColaborador],
     vagas_reais_no_periodo: int,
@@ -203,7 +219,10 @@ def calcular_demanda_onda_expansiva(
         total = 0
         for c in candidatos:
             limite_mensal = c.cota_base + (c.alocacao_extra if usar_extra else 0)
-            limite = limite_mensal * max(1, meses_tocados)
+            # Se ALOCAR TODOS OS MESES = True, participa de todos os meses da Ronda.
+            # Se ALOCAR TODOS OS MESES = False, participa apenas do seu mes natural (1 mes).
+            multiplicador = max(1, meses_tocados) if c.alocar_todos_os_meses else 1
+            limite = limite_mensal * multiplicador
             limites[c.nome] = limite
             limites_mensais[c.nome] = limite_mensal
             total += limite
@@ -823,6 +842,7 @@ def avaliar_candidatos_para_slot(
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
     ignorar_rodizio_nivel: bool = False,
+    meses_da_ronda: set[str] | None = None,
 ) -> tuple[list[CandidatoRuntime], list[CandidatoRuntime]]:
     """Devolve (validos, violadores_de_semana_alternada_mas_ainda_elegiveis).
 
@@ -946,6 +966,7 @@ def avaliar_candidatos_para_slot(
             continue
 
         # Passada normal: cascata completa de filtros obrigatorios.
+        eh_domingo = "DOMINGO" in slot.dia_da_semana.upper()
         if mapa_limites_mensais is not None:
             # A cota e um teto POR MES-CALENDARIO (nao um total poolavel do
             # ciclo inteiro): usar tudo num mes nao pode consumir a cota de
@@ -955,10 +976,27 @@ def avaliar_candidatos_para_slot(
             uso_mensal = estado.uso_por_mes.get(regra.nome, {}).get(slot.mes_key, 0)
             if uso_mensal >= limite_mensal:
                 continue
+            # Regra DOMINGO: quem tem ALOCAR TODOS OS MESES = False so pode
+            # participar do seu mes natural dentro da Ronda. Se ja foi alocado em
+            # outro mes desta mesma Ronda, fica inelegivel neste mes (nao afeta a CEIA).
+            if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
+                meses_usados = {
+                    m for m, count in estado.uso_por_mes.get(regra.nome, {}).items()
+                    if count > 0 and m in meses_da_ronda
+                }
+                if any(m != slot.mes_key for m in meses_usados):
+                    continue
         else:
             limite = mapa_limites_locais.get(regra.nome, regra.cota_base)
             if estado.uso_no_mes.get(regra.nome, 0) >= limite:
                 continue
+            if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
+                meses_usados = {
+                    m for m, count in estado.uso_por_mes.get(regra.nome, {}).items()
+                    if count > 0 and m in meses_da_ronda
+                }
+                if any(m != slot.mes_key for m in meses_usados):
+                    continue
         if excluse_header is not None and excluse_rows is not None:
             if esta_bloqueado_por_excluse(
                 regra.nome, regra.departamento, regra.funcao, slot, excluse_header, excluse_rows
@@ -1038,6 +1076,7 @@ def _avaliar_e_escolher(
     vizinhos_de_data: tuple[int | None, int | None] = (None, None),
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
+    meses_da_ronda: set[str] | None = None,
 ) -> tuple[CandidatoRuntime | None, list[str], bool, bool]:
     """Roda a cascata de filtros (+ quebra de rodizio de nivel e/ou resgate,
     se necessario) e o desempate sobre `pool`. Devolve (vencedor_ou_None,
@@ -1073,6 +1112,7 @@ def _avaliar_e_escolher(
         mapa_limites_mensais=mapa_limites_mensais,
         decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
         aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+        meses_da_ronda=meses_da_ronda,
     )
 
     usou_resgate = False
@@ -1086,6 +1126,7 @@ def _avaliar_e_escolher(
             decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
             aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
             ignorar_rodizio_nivel=True,
+            meses_da_ronda=meses_da_ronda,
         )
         usou_quebra_rodizio = bool(validos)
 
@@ -1098,6 +1139,7 @@ def _avaliar_e_escolher(
             mapa_limites_mensais=mapa_limites_mensais,
             decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
             aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
         )
 
     if not validos:
@@ -1308,6 +1350,7 @@ def alocar_grupo(
     requisitos_tema_por_slot = requisitos_tema_por_slot or {}
     slots_ceia = slots_ceia or set()
     slots_ordenados = sorted(slots_grupo, key=lambda s: s.data)
+    meses_da_ronda = {s.mes_key for s in slots_ordenados}
 
     eh_grupo_domingo = bool(slots_ordenados) and "DOMINGO" in slots_ordenados[0].dia_da_semana.upper()
     usa_ceia_alternada = any(r.ceia_alternada for r in regras_grupo)
@@ -1318,7 +1361,7 @@ def alocar_grupo(
             regras_grupo, slots_ordenados, estado, mapa_limites_locais,
             requisitos_tema_por_slot, funcao_tem_restricao_ceia, slots_ceia,
             excluse_header, excluse_rows, mapa_limites_mensais, aniversarios,
-            compromissos_cruzados,
+            compromissos_cruzados, meses_da_ronda=meses_da_ronda,
         )
 
     vizinhos_de_data_por_row = montar_vizinhos_de_data_por_row(slots_ordenados)
@@ -1333,6 +1376,7 @@ def alocar_grupo(
             decisoes_por_row=decisoes_por_row,
             vizinhos_de_data=vizinhos_de_data_por_row.get(slot.row_index, (None, None)),
             aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
         )
 
         if vencedor is None:
@@ -1369,6 +1413,7 @@ def _alocar_grupo_domingo_ceia_alternada(
     mapa_limites_mensais: dict[str, int] | None,
     aniversarios: dict[str, date] | None = None,
     compromissos_cruzados: dict[str, list[date]] | None = None,
+    meses_da_ronda: set[str] | None = None,
 ) -> list[DecisaoAlocacao]:
     """Algoritmo em fases para grupos de DOMINGO que usam CEIA ALTERNADA
     (definido com o Clayton em 2026-09-06, ver CONCEITO_CEIA_ALTERNADA.md):
@@ -1377,17 +1422,20 @@ def _alocar_grupo_domingo_ceia_alternada(
         completo primeiro, em ordem cronologica, antes de qualquer slot
         normal.
       Fase 2 - remove do pool das datas restantes quem venceu a CEIA nesta
-        passada, exceto quem tem ALOCAR TODOS OS MESES=true (esse continua
-        disponivel, ainda preso a cota mensal).
+        passada, exceto quem tem ALOCAR TODOS OS MESES=true ou quem ainda
+        tem repeticao_mensal pendente (cota mensal nao esgotada).
       Fase 3 - uma unica passada pelas datas restantes (ordem cronologica):
         escolhe por prioridade dentro do pool remanescente, respeitando a
         cota mensal; quem NAO tem ALOCAR TODOS OS MESES sai do pool assim
-        que e escalado (nao repete nesta fase); quem tem, continua
+        que esgota sua cota mensal (repeticao_mensal); quem tem, continua
         disponivel para os proximos meses.
       Fase 4 - datas que sobrarem sem fechar na fase 3 sao preenchidas pela
         hierarquia de ALOCAR TODOS OS MESES=false (por prioridade),
         ignorando a cota mensal.
     """
+    if meses_da_ronda is None:
+        meses_da_ronda = {s.mes_key for s in slots_ordenados}
+
     slots_ceia_1o_domingo = [s for s in slots_ordenados if eh_slot_ceia(s)]
     slots_normais = [s for s in slots_ordenados if not eh_slot_ceia(s)]
 
@@ -1412,6 +1460,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             vizinhos_de_data=vizinhos_de_data_por_row.get(slot.row_index, (None, None)),
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
         )
         if vencedor is None:
             decisoes_por_row[slot.row_index] = DecisaoAlocacao(
@@ -1420,7 +1469,9 @@ def _alocar_grupo_domingo_ceia_alternada(
             continue
         _registrar_vencedor(estado, vencedor, slot)
         if not vencedor.regra.alocar_todos_os_meses:
-            vencedores_ceia_sem_atm.add(vencedor.nome)
+            uso = estado.uso_por_mes.get(vencedor.nome, {}).get(slot.mes_key, 0)
+            if uso >= vencedor.regra.cota_base:
+                vencedores_ceia_sem_atm.add(vencedor.nome)
         motivo = "RESGATE" if usou_resgate else "CEIA ALTERNADA"
         decisoes_por_row[slot.row_index] = DecisaoAlocacao(
             slot=slot,
@@ -1431,7 +1482,7 @@ def _alocar_grupo_domingo_ceia_alternada(
         )
 
     # Fase 2: remove da fila das datas normais quem venceu a CEIA (exceto
-    # ALOCAR TODOS OS MESES=true).
+    # ALOCAR TODOS OS MESES=true ou quem ainda tem repeticao_mensal pendente).
     pool_fase3 = [r for r in regras_grupo if r.nome not in vencedores_ceia_sem_atm]
     nomes_disponiveis_fase3 = {r.nome for r in pool_fase3}
 
@@ -1448,13 +1499,16 @@ def _alocar_grupo_domingo_ceia_alternada(
             vizinhos_de_data=vizinhos_de_data_por_row.get(slot.row_index, (None, None)),
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
         )
         if vencedor is None:
             slots_sem_fechar.append(slot)
             continue
         _registrar_vencedor(estado, vencedor, slot)
         if not vencedor.regra.alocar_todos_os_meses:
-            nomes_disponiveis_fase3.discard(vencedor.nome)
+            uso = estado.uso_por_mes.get(vencedor.nome, {}).get(slot.mes_key, 0)
+            if uso >= vencedor.regra.cota_base:
+                nomes_disponiveis_fase3.discard(vencedor.nome)
         motivo = _motivo_normal(vencedor, usou_resgate)
         decisoes_por_row[slot.row_index] = DecisaoAlocacao(
             slot=slot,
@@ -1498,6 +1552,7 @@ def _alocar_grupo_domingo_ceia_alternada(
             decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_do_slot,
             aniversarios=aniversarios,
             compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
         )
         if vencedor is None:
             vencedor, ordenados_nomes, usou_resgate, _usou_quebra_rodizio = _avaliar_e_escolher(
@@ -1507,6 +1562,7 @@ def _alocar_grupo_domingo_ceia_alternada(
                 decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_do_slot,
                 aniversarios=aniversarios,
                 compromissos_cruzados=compromissos_cruzados,
+                meses_da_ronda=meses_da_ronda,
             )
         motivo = "PREENCHIMENTO DE LACUNA"
         if vencedor is None:

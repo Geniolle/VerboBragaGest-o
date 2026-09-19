@@ -504,6 +504,37 @@ def esta_bloqueado_por_descanso_cruzado(
     return any(diff_days(d, data_slot) < dias_minimos for d in datas)
 
 
+def eh_slot_ceia(slot: SlotAgenda) -> bool:
+    """True se o slot corresponde a data de CEIA (1o domingo do mes em DOMINGO)."""
+    return slot.semana_do_mes == 1 and "DOMINGO" in slot.dia_da_semana.upper()
+
+
+def calcular_participantes_ciclo_ceia(
+    nomes_ceia: set[str],
+    historico_ceia: list[str],
+) -> set[str]:
+    """Descobre quem ja participou no ciclo de CEIA em andamento.
+
+    Percorre o historico cronologico (do mais antigo para o mais recente).
+    A cada vez que todos os colaboradores de `nomes_ceia` tiverem participado
+    pelo menos uma vez, o ciclo fecha e um novo ciclo se inicia.
+    Retorna o conjunto de colaboradores de `nomes_ceia` que ja participaram
+    no ciclo atual (ainda incompleto). Se o ciclo acabou de fechar ou o
+    historico esta vazio, retorna conjunto vazio (todos elegiveis para novo ciclo).
+    """
+    if not nomes_ceia:
+        return set()
+
+    participantes_ciclo: set[str] = set()
+    for nome in historico_ceia:
+        if nome in nomes_ceia:
+            participantes_ciclo.add(nome)
+            if nomes_ceia.issubset(participantes_ciclo):
+                participantes_ciclo = set()
+
+    return participantes_ciclo
+
+
 # ---------------------------------------------------------------------------
 # 4. Requisitos de tema (Fase 0 - forca-tarefa P1 para D. MINISTROS/QUARTA)
 # ---------------------------------------------------------------------------
@@ -679,10 +710,16 @@ def chave_ordenacao_candidato(cand: CandidatoRuntime, ctx: ContextoDesempate) ->
     # historico = ctx.historico_total.get(r.nome, 0)
     # desempate_aleatorio = random.random()
 
+    eh_ceia = eh_slot_ceia(ctx.slot) and r.ceia_alternada
     reserva_ceia_penalizada = (
         ctx.funcao_tem_restricao_ceia and not ctx.slot_e_ceia and r.ceia_alternada
     )
-    if r.semana_preferencial == 0:
+    if eh_ceia:
+        # No 1o domingo sujeito a CEIA, CEIA ALTERNADA sobrepoe SEMANA PREFERENCIAL
+        # e PRIORIDADE NA ALOCACAO. Entre os elegiveis do ciclo da CEIA, o desempate
+        # e direto por PRIORIDADE (menor numero = maior prioridade).
+        rank_semana_preferencial = 0
+    elif r.semana_preferencial == 0:
         rank_semana_preferencial = 1  # sem preferencia cadastrada -- neutro
     elif is_valid_preferred_week(r.semana_preferencial, ctx.slot.data):
         rank_semana_preferencial = 0  # pediu esta semana -- prioridade total
@@ -801,16 +838,17 @@ def avaliar_candidatos_para_slot(
 
     vizinhos = estado.nomes_usados_por_linha_vizinha.get(slot.row_index, set())
 
-    # Rodizio completo da CEIA (2026-09-07, pedido do Clayton: nao basta
-    # excluir so o ultimo vencedor -- ninguem da hierarquia de CEIA
-    # ALTERNADA pode repetir ate que TODOS os outros elegiveis ja tenham
-    # sido escolhidos ao menos uma vez desde a ultima volta). Janela =
-    # tamanho da hierarquia - 1 (o proprio "due" fica de fora da janela).
-    tamanho_hierarquia_ceia = len({c.nome for c in candidatos if c.ceia_alternada})
-    janela_ceia = max(0, tamanho_hierarquia_ceia - 1)
-    recentes_ceia_bloqueados = (
-        set(estado.historico_vencedores_ceia[-janela_ceia:]) if janela_ceia > 0 else set()
+    # Rodizio completo da CEIA: ninguem da hierarquia de CEIA ALTERNADA pode
+    # repetir ate que TODOS os outros elegiveis do ciclo ja tenham participado.
+    # Olha para tras no historico e descobre quem ja participou no ciclo em andamento.
+    # Somente apos todos participarem e que um novo ciclo se inicia.
+    nomes_ceia = {c.nome for c in candidatos if c.ceia_alternada}
+    bloqueados_ceia = (
+        calcular_participantes_ciclo_ceia(nomes_ceia, estado.historico_vencedores_ceia)
+        if len(nomes_ceia) > 1
+        else set()
     )
+    eh_ceia = eh_slot_ceia(slot) and bool(nomes_ceia)
 
     # Rodizio completo por NIVEL de senioridade (2026-09-08, pedido do
     # Clayton -- mesmo mecanismo da CEIA acima, mas por SENIOR/PLENO/JUNIOR
@@ -849,15 +887,12 @@ def avaliar_candidatos_para_slot(
                 )
 
     for regra in candidatos:
-        if slot.semana_do_mes == 1 and "DOMINGO" in slot.dia_da_semana.upper():
-            # Regra CEIA ALTERNADA (2026-09-06, ver CONCEITO_CEIA_ALTERNADA.md):
-            # o 1o domingo do mes (= a data da CEIA) so pode ser ocupado por
-            # quem tem CEIA ALTERNADA=True. Restrito a DOMINGO:
-            # "semana_do_mes==1" tambem ocorre em outros dias da semana
-            # (ex.: 1a quarta-feira do mes), onde a CEIA nao se aplica.
+        if eh_ceia:
+            # Regra CEIA ALTERNADA (1o domingo do mes = data da CEIA):
+            # So concorre quem tem CEIA ALTERNADA=True e ainda nao participou no ciclo.
             if not regra.ceia_alternada:
                 continue
-            if regra.nome in recentes_ceia_bloqueados:
+            if regra.nome in bloqueados_ceia:
                 continue
 
         if ignorar_vizinhanca_e_descanso:
@@ -954,11 +989,12 @@ def avaliar_candidatos_para_slot(
         # caso, ela fica de fora e outra pessoa e alocada normalmente. So se
         # aplica na passada normal: o RESGATE (ultimo recurso, mais abaixo)
         # continua ignorando semana preferencial de proposito, como ja
-        # documentado ali.
-        if regra.semana_preferencial != 0 and not is_valid_preferred_week(
-            regra.semana_preferencial, slot.data
-        ):
-            continue
+        # No 1o domingo sujeito a CEIA ALTERNADA, a CEIA sobrepoe a semana preferencial.
+        if not eh_ceia:
+            if regra.semana_preferencial != 0 and not is_valid_preferred_week(
+                regra.semana_preferencial, slot.data
+            ):
+                continue
         if decisoes_por_row is not None and viola_vizinhanca_de_datas(
             regra.nome, vizinhos_de_data, decisoes_por_row
         ):
@@ -1078,7 +1114,7 @@ def _avaliar_e_escolher(
         zumbis_prioritarios=estado.zumbis_prioritarios,
         ultima_data_usada=estado.ultima_data_usada,
         funcao_tem_restricao_ceia=funcao_tem_restricao_ceia,
-        slot_e_ceia=slot.row_index in slots_ceia,
+        slot_e_ceia=(slot.row_index in slots_ceia) or eh_slot_ceia(slot),
         contagem_tema_atual=(
             estado.historico_vencedores_por_tema.get(slot.tema.strip().upper(), {})
             if "QUARTA" in slot.dia_da_semana.upper() and slot.tema
@@ -1101,7 +1137,7 @@ def _registrar_vencedor(
     estado.historico_total[nome] = estado.historico_total.get(nome, 0) + 1
     estado.nomes_usados_por_linha_vizinha.setdefault(slot.row_index, set()).add(nome)
     estado.zumbis_prioritarios.discard(nome)
-    if slot.semana_do_mes == 1:
+    if eh_slot_ceia(slot):
         estado.historico_vencedores_ceia.append(nome)
     if "QUARTA" in slot.dia_da_semana.upper():
         # Rodizio por NIVEL (2026-09-08): registra sob o nivel de
@@ -1352,8 +1388,8 @@ def _alocar_grupo_domingo_ceia_alternada(
         hierarquia de ALOCAR TODOS OS MESES=false (por prioridade),
         ignorando a cota mensal.
     """
-    slots_ceia_1o_domingo = [s for s in slots_ordenados if s.semana_do_mes == 1]
-    slots_normais = [s for s in slots_ordenados if s.semana_do_mes != 1]
+    slots_ceia_1o_domingo = [s for s in slots_ordenados if eh_slot_ceia(s)]
+    slots_normais = [s for s in slots_ordenados if not eh_slot_ceia(s)]
 
     decisoes_por_row: dict[int, DecisaoAlocacao] = {}
     # Vizinhos DE DATA (data anterior/seguinte na propria sequencia semanal

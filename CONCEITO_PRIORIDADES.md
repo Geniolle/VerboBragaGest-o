@@ -21,7 +21,7 @@ alternada) **não filtram elegibilidade** — elas só desempatam entre quem já
 ```mermaid
 flowchart TD
     A[Slot a preencher: DATA + DIA DA SEMANA] --> B{1o domingo do mes<br/>E dia = DOMINGO?}
-    B -- sim --> B1[So concorre quem tem<br/>CEIA ALTERNADA = true<br/>e nao venceu a CEIA<br/>na rotacao anterior]
+    B -- sim --> B1[So concorre quem tem<br/>CEIA ALTERNADA = true<br/>e ainda nao participou<br/>no ciclo atual da CEIA]
     B -- nao --> C
     B1 --> C
 
@@ -38,7 +38,7 @@ flowchart TD
     C5 -->|ok| C6
     C6[6. Bloqueado por rodizio<br/>de NIVEL - SENIOR/PLENO/JUNIOR?] -->|sim, ja venceu recente| X1
     C6 -->|nao| C7
-    C7["7. SEMANA PREFERENCIAL != 0<br/>E nao bate com a semana do slot?"] -->|nao bate| X1
+    C7["7. SEMANA PREFERENCIAL != 0<br/>E nao bate com a semana do slot?<br/>(ignorado no 1o dom. c/ CEIA)"] -->|nao bate| X1
     C7 -->|bate ou nao tem pref| C8
     C8[8. Vizinhanca de datas /<br/>colisao com linha vizinha?] -->|colide, sem sinc| X1
     C8 -->|ok| C9
@@ -62,8 +62,8 @@ Aplicados dentro de `avaliar_candidatos_para_slot`, passada normal (função
 `_avaliar_e_escolher` em `motor.py`). Qualquer um destes elimina o candidato
 por completo — ele nem chega na cascata de desempate:
 
-1. **CEIA ALTERNADA** (só no 1º domingo do mês): quem tem
-   `ceia_alternada=False`, ou venceu a CEIA na rotação anterior, é excluído.
+1. **CEIA ALTERNADA** (só no 1º domingo do mês em DOMINGO): quem tem
+   `ceia_alternada=False`, ou já participou no ciclo atual da CEIA, é excluído.
    Ver [[CONCEITO_CEIA_ALTERNADA]].
 2. **Cota mensal/local**: já usou a cota do mês (`cota_base`, ou o limite
    calculado pela onda expansiva)? Fora.
@@ -79,12 +79,13 @@ por completo — ele nem chega na cascata de desempate:
 7. **Rodízio por nível**: mesmo dentro do nível certo, quem venceu
    recentemente nesse nível (dentro da janela = tamanho do nível − 1) fica
    bloqueado até todos os outros do mesmo nível já terem sido escalados.
-8. **SEMANA PREFERENCIAL (filtro obrigatório desde 2026-09-08)**: se o
+8. **SEMANA PREFERENCIAL**: fora do 1º domingo sujeito a CEIA ALTERNADA, se o
    colaborador tem `semana_preferencial != 0` e a semana do slot **não**
    bate com essa preferência, ele é excluído — não concorre àquela vaga de
-   jeito nenhum, mesmo que sobrasse como único candidato. Só concorre nas
-   semanas que batem com a preferência dele (ou em qualquer semana, se
-   `semana_preferencial == 0`, ou seja, sem preferência cadastrada).
+   jeito nenhum. Só concorre nas semanas que batem com a preferência dele (ou em
+   qualquer semana, se `semana_preferencial == 0`). No 1º domingo com CEIA ALTERNADA,
+   a CEIA sobrepõe a semana preferencial (candidatos da CEIA com semana != 1 não
+   são excluídos, pois o ciclo da CEIA tem precedência).
 9. **Vizinhança de datas / colisão de linha vizinha**: mesma pessoa em
    linhas adjacentes da agenda (a menos que tenha `sinc_colaborador`
    natural apontando pra lá).
@@ -109,9 +110,9 @@ anterior(es) empataram:
 | # | Critério | Como funciona |
 |---|---|---|
 | 1 | **Reserva de CEIA** | Se a função tem restrição de CEIA e o slot NÃO é a CEIA, quem tem `ceia_alternada=True` é empurrado pra trás — reservado pra vaga de CEIA em vez de "gasto" num domingo comum. |
-| 2 | **SEMANA PREFERENCIAL (rank)** | 3 níveis: **0** = pediu exatamente esta semana (vence sempre); **1** = não tem preferência cadastrada (neutro); **2** = pediu outra semana, só chega aqui via resgate (na passada normal já foi filtrado na etapa 1). Rank 0 sempre vence rank 1, mesmo que a prioridade cadastrada dele seja pior. |
+| 2 | **SEMANA PREFERENCIAL (rank)** | No 1º domingo com CEIA ALTERNADA, este critério é neutralizado (rank 0 para todos os candidatos da CEIA, permitindo que a PRIORIDADE ordene o ciclo). Nos demais casos: 3 níveis: **0** = pediu exatamente esta semana (vence sempre); **1** = não tem preferência cadastrada (neutro); **2** = pediu outra semana, só chega aqui via resgate. Rank 0 sempre vence rank 1, mesmo que a prioridade cadastrada dele seja pior. |
 | 3 | **SEMANA ALTERNADA** | Quem tem `semana_alternada=True` e não respeitou o descanso mínimo desde a última vez é penalizado (empurrado pro fim). |
-| 4 | **PRIORIDADE** | Número cadastrado (`PRIORIDADE`, menor = melhor). **Só decide quando os 3 critérios acima empataram** — é o último critério, não o primeiro. |
+| 4 | **PRIORIDADE** | Número cadastrado (`PRIORIDADE`, menor = melhor). **Só decide quando os 3 critérios acima empataram** (ou no 1º domingo de CEIA, onde rank de preferência é neutro). |
 
 Ou seja: **PRIORIDADE é o critério de desempate de MENOR peso** dos quatro
 ativos hoje — só é consultado quando ninguém se destacou por CEIA, SEMANA

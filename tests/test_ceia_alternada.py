@@ -288,3 +288,205 @@ def test_aniversariante_fica_sem_alocacao_quando_e_o_unico_candidato():
 
     assert decisoes[0].vencedor is None
     assert decisoes[0].motivo == "SEM ALOCAÇÃO"
+
+
+def test_cenario_1_primeiro_domingo_ceia_prevalece_sobre_semana_preferencial_1_ja_participada():
+    # CENARIO 1:
+    # - primeiro domingo;
+    # - existem varios CEIA ALTERNADA = TRUE;
+    # - um deles tem SEMANA PREFERENCIAL = 1;
+    # - ele ja participou no ciclo;
+    # - outro ainda nao participou;
+    # RESULTADO:
+    # deve escolher quem ainda nao participou.
+    # A semana preferencial nao pode vencer o rodizio da CEIA.
+    colab_a = _regra("ColabA", prioridade=1, ceia_alternada=True, semana_preferencial=1)
+    colab_b = _regra("ColabB", prioridade=2, ceia_alternada=True, semana_preferencial=0)
+    slots = [_slot(1, date(2026, 2, 1))]  # 1o domingo de fevereiro
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["ColabA"])
+    limites = {"ColabA": 10, "ColabB": 10}
+
+    decisoes = alocar_grupo([colab_a, colab_b], slots, estado, limites)
+
+    assert decisoes[0].vencedor == "ColabB"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+
+
+def test_cenario_2_primeiro_domingo_proximo_bloqueado_por_excluse_mantem_pendente_no_ciclo():
+    # CENARIO 2:
+    # - primeiro domingo;
+    # - proximo da rotacion esta bloqueado por Excluse;
+    # RESULTADO:
+    # deve escolher o proximo elegivel sem considerar o bloqueado como tendo cumprido a vez.
+    colab_a = _regra("ColabA", prioridade=1, ceia_alternada=True)
+    colab_b = _regra("ColabB", prioridade=2, ceia_alternada=True)
+    colab_c = _regra("ColabC", prioridade=3, ceia_alternada=True)
+    regras = [colab_a, colab_b, colab_c]
+    limites = {"ColabA": 10, "ColabB": 10, "ColabC": 10}
+
+    # Mes 1: ColabA participa
+    slots_mes1 = [_slot(1, date(2026, 1, 4))]
+    estado = EstadoExecucaoGrupo()
+    decisoes_mes1 = alocar_grupo(regras, slots_mes1, estado, limites)
+    assert decisoes_mes1[0].vencedor == "ColabA"
+
+    # Mes 2: ColabB (proximo da rotacao) esta bloqueado por Excluse
+    excluse_header = {"COLUNAS": 0, "ID_MINISTROS": 1}
+    excluse_rows = [["MINISTRO", "BLOQUEIO_B"]]
+    slots_mes2 = [
+        SlotAgenda(
+            row_index=2,
+            data=date(2026, 2, 1),
+            dia_da_semana="DOMINGO",
+            tema="",
+            mes_key="2026-02",
+            semana_do_mes=1,
+            is_ultima_ocorrencia_do_mes=False,
+            papeis={"BLOQUEIO_B": "ColabB"},
+        )
+    ]
+    decisoes_mes2 = alocar_grupo(
+        regras, slots_mes2, estado, limites,
+        excluse_header=excluse_header, excluse_rows=excluse_rows,
+    )
+    # Deve escolher ColabC (proximo elegivel)
+    assert decisoes_mes2[0].vencedor == "ColabC"
+
+    # Mes 3: ColabB agora esta desbloqueado.
+    # ColabA e ColabC ja participaram no ciclo; ColabB continua pendente!
+    slots_mes3 = [_slot(3, date(2026, 3, 1))]
+    decisoes_mes3 = alocar_grupo(regras, slots_mes3, estado, limites)
+    # ColabB deve ser o escolhido, pois nao cumpriu a vez no mes 2
+    assert decisoes_mes3[0].vencedor == "ColabB"
+
+
+def test_cenario_3_todos_participantes_ceia_ja_participaram_inicia_novo_ciclo():
+    # CENARIO 3:
+    # - todos os participantes elegiveis da CEIA ja participaram;
+    # RESULTADO:
+    # pode iniciar um novo ciclo de CEIA.
+    colab_a = _regra("ColabA", prioridade=1, ceia_alternada=True)
+    colab_b = _regra("ColabB", prioridade=2, ceia_alternada=True)
+    colab_c = _regra("ColabC", prioridade=3, ceia_alternada=True)
+    regras = [colab_a, colab_b, colab_c]
+    limites = {"ColabA": 10, "ColabB": 10, "ColabC": 10}
+
+    # Todos os 3 ja participaram no historico
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["ColabA", "ColabB", "ColabC"])
+    slots = [_slot(1, date(2026, 4, 5))]  # 1o domingo de abril
+
+    decisoes = alocar_grupo(regras, slots, estado, limites)
+
+    # Novo ciclo inicia: o de maior prioridade (ColabA) e escolhido
+    assert decisoes[0].vencedor == "ColabA"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+
+
+def test_cenario_4_domingo_nao_primeiro_semana_preferencial_vence_prioridade():
+    # CENARIO 4:
+    # - domingo que NAO e o primeiro domingo;
+    # - existe colaborador elegivel com SEMANA PREFERENCIAL correspondente;
+    # RESULTADO:
+    # semana preferencial vence prioridade.
+    colab_a = _regra("ColabA", prioridade=1, semana_preferencial=0)
+    colab_b = _regra("ColabB", prioridade=10, semana_preferencial=2)
+    slots = [_slot(1, date(2026, 1, 11))]  # 2o domingo (semana_do_mes == 2)
+    estado = EstadoExecucaoGrupo()
+    limites = {"ColabA": 10, "ColabB": 10}
+
+    decisoes = alocar_grupo([colab_a, colab_b], slots, estado, limites)
+
+    assert decisoes[0].vencedor == "ColabB"
+
+
+def test_cenario_5_domingo_normal_sem_semana_preferencial_usa_prioridade():
+    # CENARIO 5:
+    # - domingo normal;
+    # - ninguem tem semana preferencial correspondente;
+    # RESULTADO:
+    # usa PRIORIDADE NA ALOCACAO.
+    colab_a = _regra("ColabA", prioridade=1, semana_preferencial=0)
+    colab_b = _regra("ColabB", prioridade=2, semana_preferencial=0)
+    colab_c = _regra("ColabC", prioridade=3, semana_preferencial=2)  # pref semana 2, mas slot e semana 3
+    slots = [_slot(1, date(2026, 1, 18))]  # 3o domingo (semana_do_mes == 3)
+    estado = EstadoExecucaoGrupo()
+    limites = {"ColabA": 10, "ColabB": 10, "ColabC": 10}
+
+    decisoes = alocar_grupo([colab_a, colab_b, colab_c], slots, estado, limites)
+
+    assert decisoes[0].vencedor == "ColabA"
+
+
+def test_cenario_6_garantir_que_alteracao_nao_muda_logica_de_quarta_feira():
+    # CENARIO 6:
+    # - garantir que a alteracao nao muda a logica de quarta-feira.
+    # Quarta-feira nao tem CEIA mesmo na 1a semana do mes.
+    colab_a = _regra(
+        "ColabA",
+        prioridade=1,
+        dia_da_semana="QUARTA-FEIRA",
+        ceia_alternada=True,
+        temas=["P1"],
+    )
+    colab_b = _regra(
+        "ColabB",
+        prioridade=2,
+        dia_da_semana="QUARTA-FEIRA",
+        ceia_alternada=False,
+        temas=["P1"],
+    )
+    slot_quarta = SlotAgenda(
+        row_index=1,
+        data=date(2026, 1, 7),  # 1a quarta-feira do mes
+        dia_da_semana="QUARTA-FEIRA",
+        tema="Tema Teste",
+        mes_key="2026-01",
+        semana_do_mes=1,
+        is_ultima_ocorrencia_do_mes=False,
+    )
+    estado = EstadoExecucaoGrupo()
+    limites = {"ColabA": 10, "ColabB": 10}
+    requisitos = {1: "SENIOR"}
+
+    decisoes = alocar_grupo(
+        [colab_a, colab_b],
+        [slot_quarta],
+        estado,
+        limites,
+        requisitos_tema_por_slot=requisitos,
+    )
+
+    assert decisoes[0].vencedor == "ColabA"
+    assert decisoes[0].motivo == "ALOCAÇÃO NORMAL"  # Nao e "CEIA ALTERNADA"
+    # Historico de CEIA nao pode ter sido preenchido por quarta-feira
+    assert len(estado.historico_vencedores_ceia) == 0
+
+
+def test_primeiro_domingo_ceia_nao_descarta_candidato_com_semana_preferencial_diferente():
+    # Colaborador com CEIA_ALTERNADA=True e SEMANA_PREFERENCIAL=2 (ou outra != 1)
+    # NAO e descartado no 1o domingo, pois a CEIA sobrepoe a semana preferencial.
+    colab_a = _regra("ColabA", prioridade=1, ceia_alternada=True, semana_preferencial=2)
+    colab_b = _regra("ColabB", prioridade=2, ceia_alternada=True, semana_preferencial=0)
+    slots = [_slot(1, date(2026, 1, 4))]  # 1o domingo de janeiro (semana_do_mes == 1)
+    estado = EstadoExecucaoGrupo()
+    limites = {"ColabA": 10, "ColabB": 10}
+
+    decisoes = alocar_grupo([colab_a, colab_b], slots, estado, limites)
+
+    assert decisoes[0].vencedor == "ColabA"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+
+
+def test_primeiro_domingo_ceia_descarta_candidato_sem_ceia_alternada_mesmo_com_pref_1():
+    # Colaborador com CEIA_ALTERNADA=False e SEMANA_PREFERENCIAL=1 NAO pode vencer
+    # a CEIA no 1o domingo quando ha candidatos com CEIA_ALTERNADA=True no grupo.
+    colab_a = _regra("ColabA", prioridade=1, ceia_alternada=False, semana_preferencial=1)
+    colab_b = _regra("ColabB", prioridade=2, ceia_alternada=True, semana_preferencial=0)
+    slots = [_slot(1, date(2026, 1, 4))]  # 1o domingo de janeiro (semana_do_mes == 1)
+    estado = EstadoExecucaoGrupo()
+    limites = {"ColabA": 10, "ColabB": 10}
+
+    decisoes = alocar_grupo([colab_a, colab_b], slots, estado, limites)
+
+    assert decisoes[0].vencedor == "ColabB"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"

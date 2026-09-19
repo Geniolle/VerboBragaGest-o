@@ -44,6 +44,22 @@ mesmas regras do script original.
    uv run python scripts/verificar_acesso.py
    ```
 
+## Instruções de agente (Codex) e skills
+
+Este repositório mantém uma arquitetura permanente de instruções para
+agentes de codificação:
+
+- [`AGENTS.md`](AGENTS.md) — regras universais e obrigatórias (segurança de
+  escrita na spreadsheet, testes, governança de skills).
+- [`.agents/skills/`](.agents/skills/) — workflows especializados e
+  repetíveis (executar uma Ronda, investigar uma alocação, alterar uma
+  regra, validar um grupo, manter esta própria estrutura), cada um com o
+  seu `SKILL.md`.
+
+Qualquer processo, regra ou validação nova deve primeiro ser avaliado
+contra essa estrutura (ver a secção "Agent/Skill Maintenance" em
+`AGENTS.md`) antes de virar código solto.
+
 ## Estrutura do projeto
 
 ```
@@ -184,7 +200,8 @@ considerar o fechamento do mês calendário.
 - Alerta de "SEM ALOCAÇÃO" (proposta D): `alerta_sem_alocacao.py` monta
   assunto/corpo do alerta a partir de `EMAIL LIDER`, mas **nao envia
   nada** — nao ha servico de e-mail configurado neste projeto.
-- 46 testes unitarios passando (`uv run pytest`).
+- Suite de testes unitarios cobrindo o motor e os modulos de apoio; toda a
+  suite deve passar (`uv run pytest`).
 - Teste de integracao real executado com sucesso via
   `scripts/testar_ministros_quarta.py` (reexecutado apos ligar Excluse e o
   historico real): duplicou `BP ALGORITIMO` e `AppAnualGlobal` para

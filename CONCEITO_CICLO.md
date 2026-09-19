@@ -50,6 +50,30 @@ data ainda tiver mais ocorrencias daquele dia da semana sobrando, essas
 datas extras entram no MESMO ciclo, estendendo-o alem de `N`, ate que o mes
 termine por completo.
 
+Esse recorte inicial tambem NAO e, sozinho, a condicao de encerramento da
+Ronda. Depois de alocar o bloco, o motor precisa reavaliar o estado real das
+obrigacoes:
+
+- todos os colaboradores-base da Ronda ja participaram?
+- as obrigacoes mensais de `REPETICAO MENSAL` aplicaveis aos meses tocados
+  estao satisfeitas?
+- quem tem `ALOCAR TODOS OS MESES=true` cumpriu sua cota em CADA mes que a
+  Ronda efetivamente entrou?
+
+Se uma participacao-base ainda estiver pendente no fecho do mes, a Ronda
+continua para o mes seguinte. A partir do momento em que esse novo mes entra
+na Ronda, ele passa a gerar tambem as obrigacoes mensais de todos os
+colaboradores com `ALOCAR TODOS OS MESES=true`. Por exemplo, se um colaborador
+tem `REPETICAO MENSAL=2` e `ALOCAR TODOS OS MESES=true`, e dezembro entrou na
+Ronda porque outra pessoa ainda estava pendente, esse colaborador passa a
+precisar de 2 alocacoes em dezembro.
+
+Essa extensao nao pode virar um loop infinito: se, ao fechar um mes, restarem
+apenas obrigacoes mensais daquele proprio mes e nenhuma participacao-base
+pendente que justifique abrir outro mes, o motor deve diagnosticar a situacao
+como incompleta/impossivel pelas datas ou filtros disponiveis, em vez de
+avancar indefinidamente para meses futuros criando novas obrigacoes.
+
 ## Exemplo real (D. MINISTROS / MINISTRO / DOMINGO, N = 7)
 
 Colaboradores ativos: Ana Lima, Andre Luiz, Caio Lima, Clayton Lopes,
@@ -106,11 +130,14 @@ de DOMINGO:
      Demanda = 8 base + 3 adicionais = 11 alocações. X aparece 2x no Mês A e 2x no Mês B (4 alocações no total).
 
 4. **Demanda vs Datas da Ronda**:
-   - A demanda (ex.: 9 ou 11) é a quantidade de alocações necessárias para cumprir
-     as cotas do grupo.
-   - As datas do calendário da Ronda são delimitadas pela rotação base de $N$
-     colaboradores ativos + extensão para fechamento completo do mês
+   - A demanda (ex.: 9 ou 11) ajuda a calcular tetos/cotas para o bloco em
+     processamento, mas NAO encerra a Ronda por si so.
+   - As datas do calendario da Ronda comecam pela rotacao base de $N$
+     colaboradores ativos + extensao para fechamento completo do mes
      (`delimitar_uma_ronda`), sem quebrar meses ao meio.
+   - Depois da alocacao, `ronda_esta_completa` reavalia as obrigacoes reais.
+     Se houver participacao-base pendente, a Ronda entra no proximo mes inteiro
+     e as cotas de `ALOCAR TODOS OS MESES=true` desse novo mes passam a existir.
 
 No grupo D. MINISTROS/MINISTRO/DOMINGO, **Clayton Lopes** e o unico com
 `ALOCAR TODOS OS MESES = TRUE` (prioridade 1). No Ronda 1 (9 datas,

@@ -107,3 +107,19 @@ class RegistroBpLog:
     mes_nao_alocados: str
     disponibilidade: bool
     timestamp_utilizacao: str
+
+
+@dataclass
+class StatusObrigacaoColaborador:
+    """Estado dinâmico das obrigações de um colaborador na Ronda."""
+
+    nome: str
+    regra: RegraColaborador
+    mes_key: str
+    participacao_base_cumprida: bool
+    alocacoes_no_mes: int
+    necessidade_restante_no_mes: int
+    alocar_todos_os_meses_aplica: bool
+    repeticao_mensal_satisfeita: bool
+    pode_concorrer: bool = True
+    motivo_bloqueio: str | None = None

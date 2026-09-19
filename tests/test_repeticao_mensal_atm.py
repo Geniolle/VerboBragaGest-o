@@ -4,8 +4,10 @@ from pastoreio_orquestrador.models import RegraColaborador, SlotAgenda
 from pastoreio_orquestrador.motor import (
     EstadoExecucaoGrupo,
     alocar_grupo,
+    alocar_ronda_dinamica,
     calcular_demanda_base_grupo,
     calcular_demanda_onda_expansiva,
+    ronda_esta_completa,
 )
 from pastoreio_orquestrador.parsing_utils import week_of_month
 
@@ -414,3 +416,210 @@ def test_cenario_h_garantir_quarta_feira_intocada():
     assert decisoes[0].motivo == "ALOCAÇÃO NORMAL"
     # Quarta-feira nao preenche historico de CEIA
     assert len(estado.historico_vencedores_ceia) == 0
+
+
+def _alocar_dinamico_padrao(regras, slots, estado):
+    meses_tocados = len({s.mes_key for s in slots})
+    demanda = calcular_demanda_onda_expansiva(
+        regras, vagas_reais_no_periodo=len(slots), meses_tocados=meses_tocados
+    )
+    return alocar_grupo(
+        regras,
+        slots,
+        estado,
+        demanda.mapa_limites_locais,
+        mapa_limites_mensais=demanda.mapa_limites_mensais,
+    )
+
+
+def test_ronda_nao_encerra_com_colaborador_base_pendente():
+    regras = [
+        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
+        _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
+        _regra("Apoio", prioridade=3, ceia_alternada=False),
+    ]
+    slots_nov = [
+        _slot(1, date(2026, 11, 15)),
+        _slot(2, date(2026, 11, 22)),
+        _slot(3, date(2026, 11, 29)),
+    ]
+    slots_dez = [
+        _slot(4, date(2026, 12, 6)),
+        _slot(5, date(2026, 12, 13)),
+        _slot(6, date(2026, 12, 20)),
+        _slot(7, date(2026, 12, 27)),
+    ]
+    aniversarios = {"PENDENTE": date(2000, 11, 15)}
+
+    def alocar(slots, estado):
+        meses_tocados = len({s.mes_key for s in slots})
+        demanda = calcular_demanda_onda_expansiva(
+            regras, vagas_reais_no_periodo=len(slots), meses_tocados=meses_tocados
+        )
+        return alocar_grupo(
+            regras,
+            slots,
+            estado,
+            demanda.mapa_limites_locais,
+            mapa_limites_mensais=demanda.mapa_limites_mensais,
+            aniversarios=aniversarios,
+        )
+
+    resultado = alocar_ronda_dinamica(
+        regras, slots_nov + slots_dez, EstadoExecucaoGrupo(), 1, alocar
+    )
+
+    assert any("Pendente ainda possui" in evento for evento in resultado.eventos)
+    assert any(slot.mes_key == "2026-12" for slot in resultado.slots)
+    assert resultado.completude.completa is True
+
+
+def test_novo_mes_cria_obrigacao_para_alocar_todos_os_meses():
+    regras = [
+        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
+        _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
+        _regra("Apoio", prioridade=3, ceia_alternada=False),
+    ]
+    slots = [
+        _slot(1, date(2026, 11, 15)),
+        _slot(2, date(2026, 11, 22)),
+        _slot(3, date(2026, 11, 29)),
+        _slot(4, date(2026, 12, 6)),
+        _slot(5, date(2026, 12, 13)),
+        _slot(6, date(2026, 12, 20)),
+        _slot(7, date(2026, 12, 27)),
+    ]
+    aniversarios = {"PENDENTE": date(2000, 11, 15)}
+
+    def alocar(slots_do_bloco, estado):
+        meses_tocados = len({s.mes_key for s in slots_do_bloco})
+        demanda = calcular_demanda_onda_expansiva(
+            regras, vagas_reais_no_periodo=len(slots_do_bloco), meses_tocados=meses_tocados
+        )
+        return alocar_grupo(
+            regras,
+            slots_do_bloco,
+            estado,
+            demanda.mapa_limites_locais,
+            mapa_limites_mensais=demanda.mapa_limites_mensais,
+            aniversarios=aniversarios,
+        )
+
+    resultado = alocar_ronda_dinamica(regras, slots, EstadoExecucaoGrupo(), 1, alocar)
+    status_mensal_dez = [
+        s for s in resultado.completude.status_por_colaborador
+        if s.nome == "Mensal" and s.mes_key == "2026-12"
+    ][0]
+
+    assert status_mensal_dez.alocar_todos_os_meses_aplica is True
+    assert status_mensal_dez.alocacoes_no_mes == 2
+    assert status_mensal_dez.necessidade_restante_no_mes == 0
+    assert any("obrigacao 2026-12 = 2" in evento for evento in resultado.eventos)
+
+
+def test_sequencia_dezembro_ceia_mensal_pendente_mensal():
+    regras = [
+        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
+        _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
+    ]
+    slots = [
+        _slot(1, date(2026, 12, 6)),
+        _slot(2, date(2026, 12, 13)),
+        _slot(3, date(2026, 12, 20)),
+        _slot(4, date(2026, 12, 27)),
+    ]
+    estado = EstadoExecucaoGrupo()
+    demanda = calcular_demanda_onda_expansiva(regras, len(slots), 1)
+    decisoes = alocar_grupo(
+        regras, slots, estado, demanda.mapa_limites_locais,
+        mapa_limites_mensais=demanda.mapa_limites_mensais,
+    )
+
+    assert [d.vencedor for d in decisoes] == ["Ceia", "Mensal", "Pendente", "Mensal"]
+
+
+def test_quinta_semana_nao_vai_automaticamente_para_quota_ja_cumprida():
+    regras = [
+        _regra("Ceia", prioridade=1, ceia_alternada=True),
+        _regra("Mensal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=True, ceia_alternada=False),
+        _regra("Pendente", prioridade=2, semana_preferencial=3, ceia_alternada=False),
+        _regra("Restante", prioridade=3, ceia_alternada=False),
+    ]
+    slots = [
+        _slot(1, date(2026, 3, 1)),
+        _slot(2, date(2026, 3, 8)),
+        _slot(3, date(2026, 3, 15)),
+        _slot(4, date(2026, 3, 22)),
+        _slot(5, date(2026, 3, 29)),
+    ]
+    estado = EstadoExecucaoGrupo()
+    demanda = calcular_demanda_onda_expansiva(regras, len(slots), 1)
+    decisoes = alocar_grupo(
+        regras, slots, estado, demanda.mapa_limites_locais,
+        mapa_limites_mensais=demanda.mapa_limites_mensais,
+    )
+
+    assert [d.vencedor for d in decisoes[:4]] == ["Ceia", "Mensal", "Pendente", "Mensal"]
+    assert decisoes[4].vencedor == "Restante"
+
+
+def test_repeticao_sem_atm_nao_cria_obrigacao_no_novo_mes():
+    regras = [
+        _regra("MensalLocal", prioridade=1, repeticao_mensal=2, alocar_todos_os_meses=False, ceia_alternada=False),
+        _regra("Outro", prioridade=2, ceia_alternada=False),
+    ]
+    slots = [
+        _slot(1, date(2026, 11, 8)),
+        _slot(2, date(2026, 11, 15)),
+        _slot(3, date(2026, 12, 13)),
+    ]
+    decisoes = [
+        type("D", (), {"vencedor": "MensalLocal", "slot": slots[0]})(),
+        type("D", (), {"vencedor": "Outro", "slot": slots[1]})(),
+        type("D", (), {"vencedor": "Outro", "slot": slots[2]})(),
+    ]
+
+    completude = ronda_esta_completa(regras, decisoes, slots)
+    status_dez = [
+        s for s in completude.status_por_colaborador
+        if s.nome == "MensalLocal" and s.mes_key == "2026-12"
+    ][0]
+
+    assert status_dez.necessidade_restante_no_mes == 0
+    assert status_dez.alocar_todos_os_meses_aplica is False
+
+
+def test_obrigacao_ja_cumprida_tem_necessidade_zero():
+    regras = [_regra("Mensal", repeticao_mensal=2, alocar_todos_os_meses=True)]
+    slots = [_slot(1, date(2026, 12, 13)), _slot(2, date(2026, 12, 27))]
+    decisoes = [
+        type("D", (), {"vencedor": "Mensal", "slot": slots[0]})(),
+        type("D", (), {"vencedor": "Mensal", "slot": slots[1]})(),
+    ]
+
+    completude = ronda_esta_completa(regras, decisoes, slots)
+    status = completude.status_por_colaborador[0]
+
+    assert status.alocacoes_no_mes == 2
+    assert status.necessidade_restante_no_mes == 0
+    assert status.repeticao_mensal_satisfeita is True
+
+
+def test_ronda_dinamica_nao_entra_em_loop_quando_obrigacao_mensal_e_impossivel():
+    regras = [_regra("Mensal", repeticao_mensal=2, alocar_todos_os_meses=True)]
+    slots = [_slot(1, date(2026, 12, 6))]
+
+    resultado = alocar_ronda_dinamica(
+        regras,
+        slots,
+        EstadoExecucaoGrupo(),
+        1,
+        lambda bloco, estado: _alocar_dinamico_padrao(regras, bloco, estado),
+    )
+
+    assert resultado.completude.completa is False
+    assert resultado.diagnostico is not None
+    assert "nenhuma participacao-base pendente" in resultado.diagnostico

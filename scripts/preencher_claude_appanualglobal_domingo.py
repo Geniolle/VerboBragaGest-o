@@ -58,7 +58,7 @@ from pastoreio_orquestrador.columns import ColAppAnualGlobal
 from pastoreio_orquestrador.config import load_settings
 from pastoreio_orquestrador.models import SlotAgenda
 from pastoreio_orquestrador.motor import (
-    EstadoExecucaoGrupo, alocar_grupo, calcular_demanda_onda_expansiva,
+    EstadoExecucaoGrupo, alocar_grupo, alocar_ronda_dinamica, calcular_demanda_onda_expansiva,
     delimitar_uma_ronda, filtrar_slots_ja_preenchidos,
 )
 from pastoreio_orquestrador.parsing_utils import (
@@ -214,10 +214,44 @@ def main() -> None:
         return
 
     print(f"N (colaboradores ativos no grupo) = {n_ativos}")
-    print(f"Ronda a escrever: {len(ronda_para_escrever)} domingos "
+    print(f"Ronda candidata inicial: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
-    decisoes = processar_bloco(ronda_para_escrever, aplicar_cruzados=True, ronda_aberta=True)
+    datas_abertas = [d for d in todas_as_datas if d >= ronda_para_escrever[0]]
+    slots_abertos = [
+        montar_slot(agenda_raw[row_por_data[d]], idx, row_por_data[d], d)
+        for d in datas_abertas
+    ]
+    slots_abertos = filtrar_slots_ja_preenchidos(slots_abertos, valor_por_data)
+
+    def alocar_slots_dinamicos(slots: list[SlotAgenda], estado_exec: EstadoExecucaoGrupo) -> list:
+        meses_tocados = len({s.mes_key for s in slots})
+        demanda = calcular_demanda_onda_expansiva(
+            grupo, vagas_reais_no_periodo=len(slots), meses_tocados=meses_tocados
+        )
+        return alocar_grupo(
+            grupo, slots, estado_exec, demanda.mapa_limites_locais,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=demanda.mapa_limites_mensais,
+            compromissos_cruzados=compromissos_cruzados,
+            aniversarios=aniversarios,
+        )
+
+    resultado_ronda = alocar_ronda_dinamica(
+        grupo, slots_abertos, estado, n_ativos, alocar_slots_dinamicos
+    )
+    estado = resultado_ronda.estado
+    decisoes = resultado_ronda.decisoes
+    if resultado_ronda.eventos:
+        print("Estado da Ronda:")
+        for evento in resultado_ronda.eventos:
+            print(f"  - {evento}")
+        print()
+    if resultado_ronda.diagnostico:
+        print(f"Diagnostico controlado: {resultado_ronda.diagnostico}\n")
+
+    print(f"Ronda a escrever: {len(resultado_ronda.slots)} domingos "
+          f"({resultado_ronda.slots[0].data} a {resultado_ronda.slots[-1].data})\n")
 
     print(f"Escrevendo {DEPARTAMENTO}/{FUNCAO}/{DIA} na coluna "
           f"MINISTRO (col {col_ministro + 1}) de {AGENDA_TITLE}...\n")

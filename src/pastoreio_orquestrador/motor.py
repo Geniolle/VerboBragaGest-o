@@ -92,14 +92,17 @@ dia de aniversario."""
 from __future__ import annotations
 
 import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Callable
 
 from pastoreio_orquestrador.models import (
     CandidatoRuntime,
     DecisaoAlocacao,
     RegraColaborador,
     SlotAgenda,
+    StatusObrigacaoColaborador,
     TemaClassificado,
 )
 from pastoreio_orquestrador.parsing_utils import diff_days, is_valid_preferred_week, month_key
@@ -131,6 +134,211 @@ def delimitar_uma_ronda(datas_disponiveis: list[date], n_colaboradores_ativos: i
             break
         datas_ronda.append(d)
     return datas_ronda
+
+
+def _primeiro_mes_alocado(
+    nome: str, decisoes: list[DecisaoAlocacao], meses_da_ronda: set[str],
+) -> str | None:
+    for decisao in sorted(decisoes, key=lambda d: d.slot.data):
+        if decisao.vencedor == nome and decisao.slot.mes_key in meses_da_ronda:
+            return decisao.slot.mes_key
+    return None
+
+
+def calcular_status_obrigacoes_ronda(
+    regras_grupo: list[RegraColaborador],
+    decisoes: list[DecisaoAlocacao],
+    meses_da_ronda: set[str] | None = None,
+) -> list[StatusObrigacaoColaborador]:
+    """Calcula o estado dinamico das obrigacoes da Ronda ja alocada.
+
+    A contagem e derivada das decisoes da propria Ronda, nao de uma demanda
+    fixa calculada antes da execucao. `REPETICAO MENSAL` e total do mes:
+    necessidade restante = max(0, repeticao_mensal - alocacoes_no_mes).
+    """
+    if meses_da_ronda is None:
+        meses_da_ronda = {d.slot.mes_key for d in decisoes}
+    vencedores = [d.vencedor for d in decisoes if d.vencedor]
+    contagem_por_nome_mes: dict[tuple[str, str], int] = {}
+    for decisao in decisoes:
+        if decisao.vencedor is None:
+            continue
+        chave = (decisao.vencedor, decisao.slot.mes_key)
+        contagem_por_nome_mes[chave] = contagem_por_nome_mes.get(chave, 0) + 1
+
+    status: list[StatusObrigacaoColaborador] = []
+    for regra in regras_grupo:
+        participacao_base_cumprida = regra.nome in vencedores
+        primeiro_mes = _primeiro_mes_alocado(regra.nome, decisoes, meses_da_ronda)
+        meses_aplicaveis = set(meses_da_ronda) if regra.alocar_todos_os_meses else set()
+        if not regra.alocar_todos_os_meses and primeiro_mes is not None:
+            meses_aplicaveis.add(primeiro_mes)
+
+        for mes in sorted(meses_da_ronda):
+            alocacoes_no_mes = contagem_por_nome_mes.get((regra.nome, mes), 0)
+            aplica = mes in meses_aplicaveis
+            necessidade = max(0, regra.cota_base - alocacoes_no_mes) if aplica else 0
+            status.append(
+                StatusObrigacaoColaborador(
+                    nome=regra.nome,
+                    regra=regra,
+                    mes_key=mes,
+                    participacao_base_cumprida=participacao_base_cumprida,
+                    alocacoes_no_mes=alocacoes_no_mes,
+                    necessidade_restante_no_mes=necessidade,
+                    alocar_todos_os_meses_aplica=regra.alocar_todos_os_meses and aplica,
+                    repeticao_mensal_satisfeita=necessidade == 0,
+                )
+            )
+    return status
+
+
+def ronda_esta_completa(
+    regras_grupo: list[RegraColaborador],
+    decisoes: list[DecisaoAlocacao],
+    slots_ronda: list[SlotAgenda],
+) -> ResultadoCompletudeRonda:
+    """Responsabilidade explicita de encerramento da Ronda.
+
+    A Ronda so fica completa quando toda participacao-base foi cumprida e
+    todas as obrigacoes mensais aplicaveis aos meses efetivamente tocados
+    pela Ronda foram satisfeitas.
+    """
+    meses_da_ronda = {s.mes_key for s in slots_ronda}
+    status = calcular_status_obrigacoes_ronda(regras_grupo, decisoes, meses_da_ronda)
+    pendencias: list[str] = []
+
+    vistos_base: set[str] = set()
+    for item in status:
+        if item.nome in vistos_base:
+            continue
+        vistos_base.add(item.nome)
+        if not item.participacao_base_cumprida:
+            pendencias.append(f"{item.nome}: participacao-base pendente")
+
+    for item in status:
+        if item.necessidade_restante_no_mes > 0:
+            pendencias.append(
+                f"{item.nome}: {item.necessidade_restante_no_mes} alocacao(oes) pendente(s) "
+                f"em {item.mes_key}"
+            )
+
+    return ResultadoCompletudeRonda(
+        completa=not pendencias,
+        status_por_colaborador=status,
+        pendencias=pendencias,
+    )
+
+
+def _proximo_mes_slots(
+    slots_disponiveis: list[SlotAgenda], ultimo_slot: SlotAgenda,
+) -> list[SlotAgenda]:
+    posteriores = [s for s in slots_disponiveis if s.data > ultimo_slot.data]
+    if not posteriores:
+        return []
+    proximo_mes = posteriores[0].mes_key
+    return [s for s in posteriores if s.mes_key == proximo_mes]
+
+
+def _ha_participacao_base_pendente(completude: ResultadoCompletudeRonda) -> bool:
+    return any("participacao-base pendente" in p for p in completude.pendencias)
+
+
+def alocar_ronda_dinamica(
+    regras_grupo: list[RegraColaborador],
+    slots_disponiveis: list[SlotAgenda],
+    estado_base: "EstadoExecucaoGrupo",
+    n_colaboradores_ativos: int,
+    alocar_slots: Callable[[list[SlotAgenda], "EstadoExecucaoGrupo"], list[DecisaoAlocacao]],
+    max_meses_adicionais: int = 12,
+) -> ResultadoRondaDinamica:
+    """Aloca uma Ronda reavaliando obrigacoes antes de encerra-la.
+
+    O bloco inicial continua respeitando a rotacao base + fecho do mes. Se,
+    depois de alocar esse bloco, ainda houver participacao-base pendente, a
+    Ronda entra no mes seguinte inteiro e as obrigacoes ATM desse novo mes
+    passam a existir. Se restarem apenas obrigacoes mensais impossiveis no
+    ultimo mes ja fechado, a funcao devolve diagnostico em vez de avancar
+    indefinidamente mes a mes.
+    """
+    slots_ordenados = sorted(slots_disponiveis, key=lambda s: s.data)
+    datas_iniciais = delimitar_uma_ronda([s.data for s in slots_ordenados], n_colaboradores_ativos)
+    datas_iniciais_set = set(datas_iniciais)
+    slots_ronda = [s for s in slots_ordenados if s.data in datas_iniciais_set]
+    eventos: list[str] = []
+    melhor_resultado: ResultadoRondaDinamica | None = None
+    meses_adicionados = 0
+
+    while slots_ronda:
+        estado_tentativa = deepcopy(estado_base)
+        decisoes = alocar_slots(slots_ronda, estado_tentativa)
+        completude = ronda_esta_completa(regras_grupo, decisoes, slots_ronda)
+        melhor_resultado = ResultadoRondaDinamica(
+            slots=slots_ronda,
+            decisoes=decisoes,
+            estado=estado_tentativa,
+            completude=completude,
+            eventos=list(eventos),
+            diagnostico=completude.diagnostico,
+        )
+        if completude.completa:
+            eventos.append("Ronda encerrada: nenhuma obrigacao pendente.")
+            melhor_resultado.eventos = list(eventos)
+            return melhor_resultado
+
+        if not _ha_participacao_base_pendente(completude):
+            diagnostico = (
+                "Ronda incompleta: restam obrigacoes mensais no ultimo mes processado, "
+                "mas nenhuma participacao-base pendente justifica abrir um novo mes."
+            )
+            melhor_resultado.diagnostico = diagnostico
+            melhor_resultado.eventos = list(eventos) + [diagnostico]
+            melhor_resultado.completude.diagnostico = diagnostico
+            return melhor_resultado
+
+        pendentes_base = [
+            p.replace(": participacao-base pendente", "")
+            for p in completude.pendencias
+            if "participacao-base pendente" in p
+        ]
+        verbo_pendente = "possui" if len(pendentes_base) == 1 else "possuem"
+        eventos.append(
+            "Ronda continua: "
+            + ", ".join(pendentes_base)
+            + f" ainda {verbo_pendente} participacao-base pendente."
+        )
+        proximos = _proximo_mes_slots(slots_ordenados, slots_ronda[-1])
+        if not proximos:
+            diagnostico = "Ronda incompleta: nao ha datas futuras disponiveis para satisfazer pendencias."
+            melhor_resultado.diagnostico = diagnostico
+            melhor_resultado.eventos = list(eventos) + [diagnostico]
+            melhor_resultado.completude.diagnostico = diagnostico
+            return melhor_resultado
+
+        meses_adicionados += 1
+        if meses_adicionados > max_meses_adicionais:
+            diagnostico = (
+                "Ronda incompleta: limite de meses adicionais atingido; possivel obrigacao "
+                "matematicamente impossivel pelos filtros/capacidade."
+            )
+            melhor_resultado.diagnostico = diagnostico
+            melhor_resultado.eventos = list(eventos) + [diagnostico]
+            melhor_resultado.completude.diagnostico = diagnostico
+            return melhor_resultado
+
+        novo_mes = proximos[0].mes_key
+        for regra in regras_grupo:
+            if regra.alocar_todos_os_meses:
+                eventos.append(
+                    f"{novo_mes} entrou na Ronda: {regra.nome} possui "
+                    f"ALOCAR TODOS OS MESES=True e REPETICAO MENSAL={regra.cota_base}; "
+                    f"obrigacao {novo_mes} = {regra.cota_base}."
+                )
+        datas_existentes = {s.data for s in slots_ronda}
+        slots_ronda = slots_ronda + [s for s in proximos if s.data not in datas_existentes]
+
+    completude = ResultadoCompletudeRonda(completa=True, status_por_colaborador=[])
+    return ResultadoRondaDinamica([], [], deepcopy(estado_base), completude, eventos)
 
 
 def filtrar_slots_ja_preenchidos(
@@ -190,6 +398,24 @@ class ResultadoDemanda:
     usa_cota_extra: bool
     mapa_limites_locais: dict[str, int] = field(default_factory=dict)
     mapa_limites_mensais: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class ResultadoCompletudeRonda:
+    completa: bool
+    status_por_colaborador: list[StatusObrigacaoColaborador]
+    pendencias: list[str] = field(default_factory=list)
+    diagnostico: str | None = None
+
+
+@dataclass
+class ResultadoRondaDinamica:
+    slots: list[SlotAgenda]
+    decisoes: list[DecisaoAlocacao]
+    estado: "EstadoExecucaoGrupo"
+    completude: ResultadoCompletudeRonda
+    eventos: list[str] = field(default_factory=list)
+    diagnostico: str | None = None
 
 
 def calcular_demanda_base_grupo(

@@ -93,9 +93,17 @@ Cada script de preenchimento, na prática:
    preenchidas, e reexecuta (sem escrever) os blocos já fechados através de
    um único `EstadoExecucaoGrupo` contínuo, para reconstituir o histórico
    de rodízio/quota/descanso.
-2. Calcula e escreve **apenas o próximo bloco ainda vazio**.
-3. Nunca sobrescreve uma célula já preenchida.
-4. Escreve `"SEM ALOCAÇÃO"` (texto literal) quando genuinamente não há
+2. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
+   base (`N` colaboradores ativos + fecho do mês), mas só a encerra depois de
+   `ronda_esta_completa` confirmar que todas as participações-base e
+   obrigações mensais reais foram satisfeitas.
+3. Se a Ronda aberta precisa entrar num novo mês por haver participação-base
+   pendente, esse mês passa a fazer parte da Ronda e cria as obrigações de
+   `ALOCAR TODOS OS MESES=true` desse mês; se as obrigações forem
+   matematicamente impossíveis pelas datas/filtros, o motor deve gerar
+   diagnóstico controlado em vez de avançar indefinidamente.
+4. Nunca sobrescreve uma célula já preenchida.
+5. Escreve `"SEM ALOCAÇÃO"` (texto literal) quando genuinamente não há
    candidato possível — nunca deixa a célula em branco por omissão.
 
 ## 4. Escrita — sempre via SpreadsheetGuard, sempre em CLAUDE_*

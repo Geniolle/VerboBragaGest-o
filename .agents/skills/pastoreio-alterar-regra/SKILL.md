@@ -24,7 +24,8 @@ fonte de verdade.
    `avaliar_candidatos_para_slot`/`_avaliar_e_escolher`; desempate em
    `chave_ordenacao_candidato`; fases de CEIA em
    `_alocar_grupo_domingo_ceia_alternada`; cálculo de demanda em
-   `calcular_demanda_onda_expansiva`.
+   `calcular_demanda_onda_expansiva`; encerramento dinâmico da Ronda em
+   `ronda_esta_completa`/`alocar_ronda_dinamica`.
 3. **Localizar os testes existentes** — `tests/test_motor.py`,
    `tests/test_ceia_alternada.py`, `tests/test_excluse.py`,
    `tests/test_fase0_temas.py` costumam cobrir estas áreas. Rode-os antes

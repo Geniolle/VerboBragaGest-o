@@ -169,6 +169,8 @@ Skills atuais:
   motor.
 - `pastoreio-validar-grupo` — introduzir e validar uma combinação
   `DEPARTAMENTO###FUNÇÃO###DIA DA SEMANA` em `GRUPOS_VALIDADOS.md`.
+- `pastoreio-utilizador` — processos de cadastro de pessoas/utilizador,
+  como sincronizar `Membresia` com `BP SERVICE`.
 
 ## Agent/Skill Maintenance (governança permanente)
 

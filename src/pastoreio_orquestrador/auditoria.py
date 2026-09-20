@@ -289,13 +289,17 @@ def resolver_ultimo_cursor_hierarquia(
     funcao: str,
     dia_da_semana: str,
     coluna_alocacao: str,
+    *,
+    falhar_em_inconsistencia: bool = True,
 ) -> ResultadoCursorHierarquia:
     """Reconstrui a ultima ancora real da hierarquia normal.
 
     A auditoria explica quais decisoes consumiram a hierarquia; a agenda
-    confirma que aquela alocacao esta realmente persistida. Divergencias sao
-    erro explicito, porque usar um log desligado da agenda moveria o cursor
-    para uma posicao falsa.
+    confirma que aquela alocacao esta realmente persistida. Por padrao,
+    divergencias sao erro explicito, porque usar um log desligado da agenda
+    moveria o cursor para uma posicao falsa. Processos produtivos em fase de
+    transicao podem optar por nao falhar: registros divergentes entram nos
+    diagnosticos e sao ignorados para o cursor.
     """
     agenda = _agenda_por_data(agenda_valores, dia_da_semana, coluna_alocacao)
     registros = [
@@ -322,11 +326,14 @@ def resolver_ultimo_cursor_hierarquia(
             continue
         validos.append(registro)
 
-    if inconsistencias:
+    if inconsistencias and falhar_em_inconsistencia:
         raise AuditoriaAgendaInconsistenteError("; ".join(inconsistencias))
 
     ativos_por_nome = {r.nome.strip().upper(): r for r in regras_atuais}
-    diagnosticos: list[str] = []
+    diagnosticos: list[str] = [
+        f"Auditoria ignorada por nao confirmar agenda: {msg}"
+        for msg in inconsistencias
+    ]
     ancora: str | None = None
     for registro in reversed(validos):
         if registro.vencedor.strip().upper() in ativos_por_nome:

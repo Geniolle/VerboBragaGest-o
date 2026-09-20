@@ -225,6 +225,30 @@ def test_auditoria_divergente_da_agenda_gera_diagnostico_controlado():
         )
 
 
+def test_auditoria_divergente_pode_ser_ignorada_quando_produtivo_esta_em_transicao():
+    regras = [_regra("X", 1), _regra("Y", 2), _regra("Z", 3)]
+    cursor = resolver_ultimo_cursor_hierarquia(
+        _agenda((date(2026, 12, 13), "X"), (date(2026, 12, 20), "Y")),
+        _audit(
+            (date(2026, 12, 13), "X", True, "ALOCAÇÃO NORMAL"),
+            (date(2026, 12, 20), "Z", True, "ALOCAÇÃO NORMAL"),
+        ),
+        regras,
+        DEP,
+        FUNCAO,
+        DIA,
+        COLUNA,
+        falhar_em_inconsistencia=False,
+    )
+
+    assert cursor.ancora == "X"
+    assert cursor.proximo_candidato.nome == "Y"
+    assert cursor.registros_validos[0].vencedor == "X"
+    assert cursor.diagnosticos == [
+        "Auditoria ignorada por nao confirmar agenda: 2026-12-20: auditoria indica Z, mas a agenda contem Y."
+    ]
+
+
 def test_ceia_nao_consumida_e_normal_seguinte_consumida():
     regras = [_regra("Ceia A", 1, ceia=True), _regra("Normal B", 2), _regra("Normal C", 3)]
     slots = [_slot(1, date(2026, 12, 6)), _slot(2, date(2026, 12, 13))]

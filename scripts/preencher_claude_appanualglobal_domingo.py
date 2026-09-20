@@ -180,6 +180,7 @@ def main() -> None:
         FUNCAO,
         DIA,
         COL_NOME,
+        falhar_em_inconsistencia=not args.produtivo,
     )
 
     # Todos os domingos do grupo na sheet (passado e futuro), com o valor

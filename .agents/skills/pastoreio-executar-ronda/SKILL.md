@@ -78,6 +78,12 @@ dedicado em `scripts/`:
 - `preencher_claude_appanualglobal_auxiliar_quarta.py`
 - `preencher_claude_appanualglobal_ceia.py`
 
+DOMINGO e QUARTA-FEIRA devem continuar como processos separados. Não
+transporte estado de CEIA, cursor normal de DOMINGO, intenção `CEIA`, nem
+replay/histórico de DOMINGO para o fluxo de QUARTA-FEIRA. QUARTA-FEIRA tem
+tema/nível/rodízio próprios e qualquer reconstrução histórica desse fluxo
+precisa ser desenhada e testada separadamente.
+
 `scripts/cockpit_preencher_claude.py` executa todos em sequência (aceita
 `--simular` para só mostrar a ordem, e `--continuar-em-erro`).
 
@@ -93,14 +99,21 @@ Cada script de preenchimento, na prática:
 
 1. Reconstrói os blocos de Ronda já existentes na sheet a partir das datas
    preenchidas, e reexecuta (sem escrever) os blocos já fechados através de
-   um único `EstadoExecucaoGrupo` contínuo, para reconstituir o histórico
-   de rodízio/quota/descanso.
+   um único `EstadoExecucaoGrupo` contínuo, para reconstituir estados
+   transitórios que ainda dependem do replay (ex.: lacuna/quota/descanso).
+   Não use replay para descobrir vencedor histórico de CEIA quando o dado
+   real já está persistido.
 2. Para DOMINGO, reconstrói a âncora da hierarquia normal lendo
    `AppAnualGlobal`/`CLAUDE_AppAnualGlobal` + `LOG_AUDITORIA`/
    `CLAUDE_LOG_AUDITORIA`. Use somente decisões com
    `CONSOME_HIERARQUIA=TRUE` confirmadas pela agenda real; CEIA, repetição
    mensal, ATM, resgate e lacuna não movem o cursor. Depois do replay,
    restaure essa âncora persistida antes de calcular a Ronda aberta.
+   Para o ciclo próprio da CEIA, carregue
+   `estado.historico_vencedores_ceia` pelos vencedores reais persistidos
+   (agenda confirmada por auditoria/intenção `CEIA`) antes da primeira data
+   vazia; não recalcule CEIAs passadas com a versão atual do motor e não
+   duplique o histórico com o replay.
    Ainda em DOMINGO, carregue as ocorrências de CEIA já persistidas na agenda
    para a contagem mensal de `REPETIÇÃO MENSAL`: CEIA não consome hierarquia,
    mas conta como participação mensal do colaborador.
@@ -115,6 +128,10 @@ Cada script de preenchimento, na prática:
    seleção: um `DOMINGO_NORMAL` pode ser rotação normal ou obrigação mensal.
    `GAP_FILL` explica a lacuna, mas não escolhe por uma fila implícita; use a
    política de seleção registrada/implementada para aquele tipo de decisão.
+   Ao reportar ou auditar o resultado, não rotule como `ALOCAÇÃO NORMAL` uma
+   ocorrência que entrou para cumprir `REPETIÇÃO MENSAL` ou
+   `ALOCAR TODOS OS MESES`; a pessoa/data podem ser as mesmas, mas o motivo
+   semântico precisa ficar correto para auditoria e investigações futuras.
 3. Calcula **apenas a próxima Ronda ainda vazia**, começando pelo recorte
    base (`N` colaboradores ativos + fecho do mês), mas só a encerra depois de
    `ronda_esta_completa` confirmar que todas as participações-base e

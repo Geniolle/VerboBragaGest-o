@@ -393,6 +393,143 @@ def contar_ocorrencias_mensais_por_colaborador(
     return resultado
 
 
+def carregar_historico_coluna_agenda(
+    agenda_valores: list[list[str]],
+    dia_da_semana: str,
+    coluna_participacao: str,
+    nomes_validos: dict[str, str] | None = None,
+    *,
+    somente_primeiro_domingo: bool = False,
+    antes_de: date | None = None,
+) -> list[str]:
+    """Le vencedores reais de uma coluna da agenda em ordem cronologica.
+
+    Usado para reconstruir rodizios que precisam sobreviver a novas execucoes
+    do processo Python. A AppAnualGlobal continua sendo a fonte da escala real:
+    auditoria explica a decisao, mas o historico de participantes precisa
+    confirmar quem ficou persistido na agenda.
+    """
+    if not agenda_valores:
+        return []
+
+    idx = build_header_index(agenda_valores[0])
+    nomes_validos = nomes_validos or {}
+    registros: list[tuple[date, int, str]] = []
+
+    for row_i, row in enumerate(agenda_valores[1:], start=1):
+        dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
+        if dia_da_semana.strip().upper() not in dia:
+            continue
+
+        data = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
+        if data is None:
+            continue
+        if antes_de is not None and data >= antes_de:
+            continue
+        if somente_primeiro_domingo and week_of_month(data) != 1:
+            continue
+
+        nome = get(row, idx, coluna_participacao).strip()
+        if not nome or nome.upper() == "SEM ALOCAÇÃO":
+            continue
+        registros.append((data, row_i, nomes_validos.get(nome.upper(), nome)))
+
+    registros.sort(key=lambda item: (item[0], item[1]))
+    return [nome for _, _, nome in registros]
+
+
+def _header_index_upper(header: list[str]) -> dict[str, int]:
+    return {str(nome).strip().upper(): i for i, nome in enumerate(header)}
+
+
+def _get_upper(row: list[str], idx: dict[str, int], nome_coluna: str, default: str = "") -> str:
+    i = idx.get(nome_coluna.strip().upper())
+    if i is None or i >= len(row):
+        return default
+    return str(row[i])
+
+
+def _parse_data_historico(valor: str) -> date | None:
+    valor = str(valor).strip()
+    if not valor:
+        return None
+    try:
+        return date.fromisoformat(valor[:10])
+    except ValueError:
+        return parse_date_ddmmyyyy(valor)
+
+
+def _linha_auditoria_ceia(row: list[str], idx: dict[str, int]) -> bool:
+    intent = _get_upper(row, idx, "INTENCAO_ALOCACAO").strip().upper()
+    tipo = _get_upper(row, idx, "TIPO_ALOCACAO").strip().upper()
+    motivo = _get_upper(row, idx, "MOTIVO").strip().upper()
+    return intent == "CEIA" or tipo == "CEIA" or motivo == "CEIA ALTERNADA"
+
+
+def carregar_historico_ceia_persistido(
+    agenda_valores: list[list[str]],
+    auditoria_valores: list[list[str]],
+    dia_da_semana: str,
+    coluna_alocacao: str,
+    nomes_validos: dict[str, str] | None = None,
+    *,
+    antes_de: date | None = None,
+) -> list[str]:
+    """Reconstrui a sequencia real de CEIA a partir de dados persistidos.
+
+    Para o fluxo D. MINISTROS/MINISTRO/DOMINGO, a CEIA pode estar escrita na
+    coluna MINISTRO. Por isso, a data so entra no historico quando a auditoria
+    identifica aquela alocacao como CEIA e a agenda confirma que o mesmo
+    vencedor continua persistido na coluna lida. O motor atual nao e usado
+    para recalcular quem "deveria" ter vencido no passado.
+    """
+    if not agenda_valores or not auditoria_valores:
+        return []
+
+    agenda_idx = build_header_index(agenda_valores[0])
+    auditoria_idx = _header_index_upper(auditoria_valores[0])
+    nomes_validos = nomes_validos or {}
+
+    agenda_por_data: dict[date, str] = {}
+    row_por_data: dict[date, int] = {}
+    for row_i, row in enumerate(agenda_valores[1:], start=1):
+        dia = get(row, agenda_idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
+        if dia_da_semana.strip().upper() not in dia:
+            continue
+        data = parse_date_ddmmyyyy(get(row, agenda_idx, ColAppAnualGlobal.DATA).strip())
+        if data is None:
+            continue
+        if antes_de is not None and data >= antes_de:
+            continue
+        nome = get(row, agenda_idx, coluna_alocacao).strip()
+        if not nome or nome.upper() == "SEM ALOCAÇÃO":
+            continue
+        agenda_por_data[data] = nome
+        row_por_data[data] = row_i
+
+    registros: list[tuple[date, int, str]] = []
+    datas_vistas: set[date] = set()
+    for row in auditoria_valores[1:]:
+        if not _linha_auditoria_ceia(row, auditoria_idx):
+            continue
+        data = _parse_data_historico(_get_upper(row, auditoria_idx, "DATA_SLOT"))
+        if data is None or data in datas_vistas:
+            continue
+        if antes_de is not None and data >= antes_de:
+            continue
+        vencedor_auditoria = _get_upper(row, auditoria_idx, "VENCEDOR").strip()
+        vencedor_agenda = agenda_por_data.get(data, "").strip()
+        if not vencedor_auditoria or not vencedor_agenda:
+            continue
+        if vencedor_auditoria.upper() != vencedor_agenda.upper():
+            continue
+        datas_vistas.add(data)
+        registros.append((data, row_por_data.get(data, 0), nomes_validos.get(vencedor_agenda.upper(), vencedor_agenda)))
+
+    registros.sort(key=lambda item: (item[0], item[1]))
+    return [nome for _, _, nome in registros]
+
+
 def carregar_aniversarios(valores: list[list[str]]) -> dict[str, date]:
     """Le a aba BP SERVICE e devolve {NOME em maiusculas: data_de_nascimento},
     para o filtro obrigatorio de "nao alocar o aniversariante no proprio dia

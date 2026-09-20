@@ -97,6 +97,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable
 
+from pastoreio_orquestrador.domain.common.decisions import (
+    AllocationIntent,
+    CandidateEvaluation,
+    DecisionTrace,
+)
 from pastoreio_orquestrador.domain.domingo.policies import (
     calcular_cursor_depois,
     classificar_intencao_decisao,
@@ -1547,6 +1552,350 @@ def avaliar_candidatos_para_slot(
     return validos, violadores_sem_alt
 
 
+def _motivos_rejeicao_candidato(
+    regra: RegraColaborador,
+    slot: SlotAgenda,
+    estado: EstadoExecucaoGrupo,
+    mapa_limites_locais: dict[str, int],
+    requisito_tema: str | None,
+    ignorar_vizinhanca_e_descanso: bool,
+    excluse_header: dict[str, int] | None = None,
+    excluse_rows: list[list[str]] | None = None,
+    mapa_limites_mensais: dict[str, int] | None = None,
+    decisoes_por_row: dict[int, DecisaoAlocacao] | None = None,
+    vizinhos_de_data: tuple[int | None, int | None] = (None, None),
+    aniversarios: dict[str, date] | None = None,
+    compromissos_cruzados: dict[str, list[date]] | None = None,
+    ignorar_rodizio_nivel: bool = False,
+    meses_da_ronda: set[str] | None = None,
+) -> list[str]:
+    motivos: list[str] = []
+    vizinhos = estado.nomes_usados_por_linha_vizinha.get(slot.row_index, set())
+    eh_domingo = "DOMINGO" in slot.dia_da_semana.upper()
+    nomes_ceia = {regra.nome} if regra.ceia_alternada else set()
+    eh_ceia = eh_slot_ceia(slot) and bool(nomes_ceia)
+
+    if eh_ceia:
+        if not regra.ceia_alternada:
+            motivos.append("nao participa da CEIA alternada")
+        elif len(nomes_ceia) > 1 and regra.nome in calcular_participantes_ciclo_ceia(
+            nomes_ceia, estado.historico_vencedores_ceia
+        ):
+            motivos.append("ciclo da CEIA ainda bloqueia repeticao")
+
+    if eh_domingo and not eh_ceia and quota_repeticao_mensal_atingida_por_ceia(estado, regra, slot.mes_key):
+        motivos.append("quota mensal ja atingida por participacao na CEIA")
+
+    if ignorar_vizinhanca_e_descanso:
+        if regra.alocar_todos_os_meses:
+            motivos.append("RESGATE nao aceita ALOCAR TODOS OS MESES=true")
+        if not regra.alocacao_extra:
+            motivos.append("RESGATE exige ALOCACAO EXTRA=true")
+        if excluse_header is not None and excluse_rows is not None and esta_bloqueado_por_excluse(
+            regra.nome, regra.departamento, regra.funcao, slot, excluse_header, excluse_rows
+        ):
+            motivos.append("bloqueado por Excluse")
+        if aniversarios and esta_bloqueado_por_aniversario(regra.nome, slot, aniversarios):
+            motivos.append("bloqueado por aniversario")
+        if compromissos_cruzados and esta_bloqueado_por_descanso_cruzado(
+            regra.nome, slot.data, compromissos_cruzados
+        ):
+            motivos.append("bloqueado por descanso cruzado")
+        if has_neighbor_conflict(regra.nome, vizinhos):
+            motivos.append("conflito com papel vizinho na mesma data")
+        if decisoes_por_row is not None and viola_vizinhanca_de_datas(
+            regra.nome, vizinhos_de_data, decisoes_por_row
+        ):
+            motivos.append("violaria vizinhanca de datas")
+        return motivos
+
+    if mapa_limites_mensais is not None:
+        if quota_mensal_atingida(estado, regra, slot.mes_key, mapa_limites_mensais):
+            motivos.append("quota mensal ja atingida")
+        if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
+            meses_usados = meses_usados_ate_data(estado, regra.nome, meses_da_ronda, slot.data)
+            if any(m != slot.mes_key for m in meses_usados):
+                motivos.append("ja participou em outro mes da Ronda sem ALOCAR TODOS OS MESES")
+    else:
+        limite = mapa_limites_locais.get(regra.nome, regra.cota_base)
+        uso_total = estado.uso_no_mes.get(regra.nome, 0)
+        uso_total += sum(estado.ocorrencias_mensais_externas.get(regra.nome, {}).values())
+        if uso_total >= limite:
+            motivos.append("limite local da Ronda ja atingido")
+        if not eh_ceia and eh_domingo and not regra.alocar_todos_os_meses and meses_da_ronda:
+            meses_usados = meses_usados_ate_data(estado, regra.nome, meses_da_ronda, slot.data)
+            if any(m != slot.mes_key for m in meses_usados):
+                motivos.append("ja participou em outro mes da Ronda sem ALOCAR TODOS OS MESES")
+
+    if excluse_header is not None and excluse_rows is not None and esta_bloqueado_por_excluse(
+        regra.nome, regra.departamento, regra.funcao, slot, excluse_header, excluse_rows
+    ):
+        motivos.append("bloqueado por Excluse")
+    if aniversarios and esta_bloqueado_por_aniversario(regra.nome, slot, aniversarios):
+        motivos.append("bloqueado por aniversario")
+    if compromissos_cruzados and esta_bloqueado_por_descanso_cruzado(
+        regra.nome, slot.data, compromissos_cruzados
+    ):
+        motivos.append("bloqueado por descanso cruzado")
+    if not is_tema_compativel(regra.temas, requisito_tema, regra.dia_da_semana):
+        motivos.append("tema/nivel incompatível")
+    if requisito_tema and not ignorar_rodizio_nivel:
+        chave_regra = chave_rodizio_nivel(regra, requisito_tema.upper())
+        if chave_regra is not None:
+            tamanho_bucket = 1
+            janela_bucket = max(0, tamanho_bucket - 1)
+            recentes = set(estado.historico_vencedores_por_nivel.get(chave_regra, [])[-janela_bucket:])
+            if regra.nome in recentes:
+                motivos.append("rodizio de nivel")
+    if not eh_ceia and regra.semana_preferencial != 0 and not is_valid_preferred_week(
+        regra.semana_preferencial, slot.data
+    ):
+        motivos.append("fora da semana preferencial")
+    if decisoes_por_row is not None and viola_vizinhanca_de_datas(
+        regra.nome, vizinhos_de_data, decisoes_por_row
+    ):
+        motivos.append("violaria vizinhanca de datas")
+
+    tem_conflito_vizinhanca = has_neighbor_conflict(regra.nome, vizinhos)
+    sinc_natural = bool(regra.sinc_colaborador and regra.sinc_colaborador in vizinhos)
+    if tem_conflito_vizinhanca and not sinc_natural:
+        motivos.append("conflito com papel vizinho na mesma data")
+    if not respeita_descanso_minimo(estado.ultima_data_usada.get(regra.nome), slot.data) and not regra.sinc_colaborador:
+        motivos.append("descanso minimo nao cumprido")
+
+    return motivos
+
+
+def _avaliacoes_trace_passada(
+    pool: list[RegraColaborador],
+    slot: SlotAgenda,
+    estado: EstadoExecucaoGrupo,
+    mapa_limites_locais: dict[str, int],
+    requisito_tema: str | None,
+    passada: str,
+    ignorar_vizinhanca_e_descanso: bool,
+    excluse_header: dict[str, int] | None = None,
+    excluse_rows: list[list[str]] | None = None,
+    mapa_limites_mensais: dict[str, int] | None = None,
+    decisoes_por_row: dict[int, DecisaoAlocacao] | None = None,
+    vizinhos_de_data: tuple[int | None, int | None] = (None, None),
+    aniversarios: dict[str, date] | None = None,
+    compromissos_cruzados: dict[str, list[date]] | None = None,
+    ignorar_rodizio_nivel: bool = False,
+    meses_da_ronda: set[str] | None = None,
+    ordem_pool: list[RegraColaborador] | None = None,
+) -> list[CandidateEvaluation]:
+    avaliacoes: list[CandidateEvaluation] = []
+    ordem = ordem_pool or pool
+    for posicao, regra in enumerate(ordem, start=1):
+        validos, _ = avaliar_candidatos_para_slot(
+            [regra], slot, estado, mapa_limites_locais, requisito_tema,
+            ignorar_vizinhanca_e_descanso=ignorar_vizinhanca_e_descanso,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=mapa_limites_mensais,
+            decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+            aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            ignorar_rodizio_nivel=ignorar_rodizio_nivel,
+            meses_da_ronda=meses_da_ronda,
+        )
+        motivos = _motivos_rejeicao_candidato(
+            regra, slot, estado, mapa_limites_locais, requisito_tema,
+            ignorar_vizinhanca_e_descanso=ignorar_vizinhanca_e_descanso,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=mapa_limites_mensais,
+            decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+            aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            ignorar_rodizio_nivel=ignorar_rodizio_nivel,
+            meses_da_ronda=meses_da_ronda,
+        )
+        elegivel = bool(validos)
+        if not elegivel and not motivos:
+            motivos = ["bloqueado por filtro composto"]
+        ocorrencias = ocorrencias_mensais_colaborador(estado, regra.nome, slot.mes_key)
+        avaliacoes.append(
+            CandidateEvaluation(
+                candidato=regra.nome,
+                resultado="ELEGIVEL" if elegivel else "REJEITADO",
+                motivo="; ".join(motivos) if motivos else "elegivel",
+                passada=passada,
+                ordem=posicao,
+                prioridade=regra.prioridade,
+                elegivel=elegivel,
+                motivos_rejeicao=motivos,
+                ocorrencias_mes=ocorrencias,
+                limite_mensal=limite_mensal_colaborador(regra, mapa_limites_mensais),
+                repeticao_mensal=regra.repeticao_mensal,
+                alocar_todos_os_meses=regra.alocar_todos_os_meses,
+                ceia_no_mes=ocorrencias_ceia_mensais_colaborador(estado, regra.nome, slot.mes_key),
+            )
+        )
+    return avaliacoes
+
+
+def diagnosticar_escolha_slot(
+    pool: list[RegraColaborador],
+    slot: SlotAgenda,
+    estado: EstadoExecucaoGrupo,
+    mapa_limites_locais: dict[str, int],
+    requisito_tema: str | None = None,
+    funcao_tem_restricao_ceia: bool = False,
+    slots_ceia: set[int] | None = None,
+    excluse_header: dict[str, int] | None = None,
+    excluse_rows: list[list[str]] | None = None,
+    mapa_limites_mensais: dict[str, int] | None = None,
+    decisoes_por_row: dict[int, DecisaoAlocacao] | None = None,
+    vizinhos_de_data: tuple[int | None, int | None] = (None, None),
+    aniversarios: dict[str, date] | None = None,
+    compromissos_cruzados: dict[str, list[date]] | None = None,
+    meses_da_ronda: set[str] | None = None,
+    usar_cursor_hierarquia: bool = True,
+    hierarquia_cursor_regras: list[RegraColaborador] | None = None,
+) -> DecisionTrace:
+    """Gera trace read-only da escolha de um slot usando as mesmas passadas do motor."""
+    estado_diag = deepcopy(estado)
+    slots_ceia = slots_ceia or set()
+    decisoes_por_row = dict(decisoes_por_row or {})
+    meses_da_ronda = meses_da_ronda or {slot.mes_key}
+    regras_cursor = hierarquia_cursor_regras or pool
+    slot_e_ceia = (slot.row_index in slots_ceia) or eh_slot_ceia(slot)
+    slot_normal_domingo = "DOMINGO" in slot.dia_da_semana.upper() and not slot_e_ceia
+    rank_hierarquia = (
+        montar_rank_hierarquia_continua(regras_cursor, estado_diag.cursor_hierarquia)
+        if usar_cursor_hierarquia and slot_normal_domingo
+        else {}
+    )
+    ordem_trace = sorted(pool, key=lambda r: (rank_hierarquia.get(r.nome, r.prioridade), r.prioridade, r.nome.upper()))
+    avaliacoes: list[CandidateEvaluation] = []
+
+    validos, _ = avaliar_candidatos_para_slot(
+        pool, slot, estado_diag, mapa_limites_locais, requisito_tema,
+        ignorar_vizinhanca_e_descanso=False,
+        excluse_header=excluse_header, excluse_rows=excluse_rows,
+        mapa_limites_mensais=mapa_limites_mensais,
+        decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+        aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+        meses_da_ronda=meses_da_ronda,
+    )
+    avaliacoes.extend(_avaliacoes_trace_passada(
+        pool, slot, estado_diag, mapa_limites_locais, requisito_tema, "NORMAL",
+        False, excluse_header, excluse_rows, mapa_limites_mensais,
+        decisoes_por_row, vizinhos_de_data, aniversarios, compromissos_cruzados,
+        False, meses_da_ronda, ordem_trace,
+    ))
+    usou_resgate = False
+    usou_quebra_rodizio = False
+    if not validos:
+        validos, _ = avaliar_candidatos_para_slot(
+            pool, slot, estado_diag, mapa_limites_locais, requisito_tema,
+            ignorar_vizinhanca_e_descanso=False,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=mapa_limites_mensais,
+            decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+            aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            ignorar_rodizio_nivel=True, meses_da_ronda=meses_da_ronda,
+        )
+        usou_quebra_rodizio = bool(validos)
+        avaliacoes.extend(_avaliacoes_trace_passada(
+            pool, slot, estado_diag, mapa_limites_locais, requisito_tema, "QUEBRA_RODIZIO_NIVEL",
+            False, excluse_header, excluse_rows, mapa_limites_mensais,
+            decisoes_por_row, vizinhos_de_data, aniversarios, compromissos_cruzados,
+            True, meses_da_ronda, ordem_trace,
+        ))
+
+    if not validos:
+        usou_resgate = True
+        validos, _ = avaliar_candidatos_para_slot(
+            pool, slot, estado_diag, mapa_limites_locais, requisito_tema,
+            ignorar_vizinhanca_e_descanso=True,
+            excluse_header=excluse_header, excluse_rows=excluse_rows,
+            mapa_limites_mensais=mapa_limites_mensais,
+            decisoes_por_row=decisoes_por_row, vizinhos_de_data=vizinhos_de_data,
+            aniversarios=aniversarios, compromissos_cruzados=compromissos_cruzados,
+            meses_da_ronda=meses_da_ronda,
+        )
+        avaliacoes.extend(_avaliacoes_trace_passada(
+            pool, slot, estado_diag, mapa_limites_locais, requisito_tema, "RESGATE",
+            True, excluse_header, excluse_rows, mapa_limites_mensais,
+            decisoes_por_row, vizinhos_de_data, aniversarios, compromissos_cruzados,
+            False, meses_da_ronda, ordem_trace,
+        ))
+
+    if not validos:
+        return DecisionTrace(
+            intent=AllocationIntent.NO_ALLOCATION,
+            consome_hierarquia=False,
+            conta_repeticao_mensal=False,
+            cursor_antes=estado.cursor_hierarquia,
+            cursor_depois=estado.cursor_hierarquia,
+            data=slot.data.isoformat(),
+            tipo_dia=tipo_dia_domingo(slot_e_ceia=slot_e_ceia, dia_da_semana=slot.dia_da_semana),
+            selecionado=None,
+            motivo_escolha="SEM ALOCAÇÃO",
+            hierarquia=[r.nome for r in ordem_trace],
+            avaliacoes=avaliacoes,
+        )
+
+    modo_obrigacao_mensal = False
+    if slot_normal_domingo and not usou_resgate:
+        obrigatorios = [
+            cand for cand in validos
+            if candidato_tem_obrigacao_mensal_pendente(
+                estado_diag, cand.regra, slot, mapa_limites_mensais
+            )
+        ]
+        if obrigatorios:
+            for cand in obrigatorios:
+                cand.is_obrigacao_mensal = True
+            validos = obrigatorios
+            modo_obrigacao_mensal = True
+
+    ctx = ContextoDesempate(
+        slot=slot,
+        uso_mes_anterior=estado_diag.uso_no_mes,
+        ja_usou_no_mes_atual={
+            nome: uso_meses.get(slot.mes_key, 0) > 0
+            for nome, uso_meses in estado_diag.uso_por_mes.items()
+        },
+        historico_total=estado_diag.historico_total,
+        zumbis_prioritarios=estado_diag.zumbis_prioritarios,
+        ultima_data_usada=estado_diag.ultima_data_usada,
+        funcao_tem_restricao_ceia=funcao_tem_restricao_ceia,
+        slot_e_ceia=slot_e_ceia,
+        rank_hierarquia_continua=(
+            montar_rank_hierarquia_continua(regras_cursor, estado_diag.cursor_hierarquia)
+            if usar_cursor_hierarquia and slot_normal_domingo and not modo_obrigacao_mensal
+            else {}
+        ),
+    )
+    ordenados = ordenar_candidatos(validos, ctx)
+    vencedor = ordenados[0]
+    motivo = _motivo_normal(vencedor, usou_resgate, usou_quebra_rodizio)
+    consome = _decisao_consome_hierarquia(motivo, vencedor, slot, estado_diag)
+    intent = classificar_intencao_decisao(
+        motivo=motivo,
+        consome_hierarquia=consome,
+        is_obrigacao_mensal=vencedor.is_obrigacao_mensal,
+        alocar_todos_os_meses=vencedor.regra.alocar_todos_os_meses,
+    )
+    cursor_depois = calcular_cursor_depois(estado.cursor_hierarquia, vencedor.nome, consome)
+    return DecisionTrace(
+        intent=intent,
+        consome_hierarquia=consome,
+        conta_repeticao_mensal=True,
+        cursor_antes=estado.cursor_hierarquia,
+        cursor_depois=cursor_depois,
+        data=slot.data.isoformat(),
+        tipo_dia=tipo_dia_domingo(slot_e_ceia=slot_e_ceia, dia_da_semana=slot.dia_da_semana),
+        politica_selecao=politica_selecao_por_intencao(intent),
+        selecionado=vencedor.nome,
+        motivo_escolha=motivo,
+        obrigacao_satisfeita=obrigacao_satisfeita_por_intencao(intent),
+        prioridade_selecionado=vencedor.regra.prioridade,
+        hierarquia=[r.nome for r in ordem_trace],
+        avaliacoes=avaliacoes,
+    )
+
+
 def _avaliar_e_escolher(
     pool: list[RegraColaborador],
     slot: SlotAgenda,
@@ -1858,6 +2207,10 @@ def _motivo_normal(
         return "RESGATE"
     if usou_quebra_rodizio:
         return "ALOCAÇÃO NORMAL (RODÍZIO QUEBRADO P/ FECHAR LACUNA)"
+    if vencedor.is_obrigacao_mensal:
+        if vencedor.regra.alocar_todos_os_meses:
+            return "ALOCAR TODOS OS MESES"
+        return "REPETIÇÃO MENSAL"
     return "ALOCAÇÃO NORMAL"
 
 

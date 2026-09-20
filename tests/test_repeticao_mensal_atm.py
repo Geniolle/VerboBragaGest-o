@@ -541,6 +541,19 @@ def test_sequencia_dezembro_ceia_mensal_pendente_mensal():
     )
 
     assert [d.vencedor for d in decisoes] == ["Ceia", "Mensal", "Pendente", "Mensal"]
+    assert [d.motivo for d in decisoes] == [
+        "CEIA ALTERNADA",
+        "ALOCAÇÃO NORMAL",
+        "ALOCAÇÃO NORMAL",
+        "ALOCAR TODOS OS MESES",
+    ]
+    assert [d.tipo_alocacao for d in decisoes] == [
+        "CEIA",
+        "NORMAL",
+        "NORMAL",
+        "ALOCAR_TODOS_OS_MESES",
+    ]
+    assert [d.consome_hierarquia for d in decisoes] == [False, True, True, False]
 
 
 def test_quinta_semana_nao_vai_automaticamente_para_quota_ja_cumprida():

@@ -28,6 +28,16 @@ class CandidateEvaluation:
     candidato: str
     resultado: str
     motivo: str
+    passada: str = ""
+    ordem: int | None = None
+    prioridade: int | None = None
+    elegivel: bool = False
+    motivos_rejeicao: list[str] = field(default_factory=list)
+    ocorrencias_mes: int | None = None
+    limite_mensal: int | None = None
+    repeticao_mensal: int | None = None
+    alocar_todos_os_meses: bool = False
+    ceia_no_mes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -39,4 +49,12 @@ class DecisionTrace:
     conta_repeticao_mensal: bool
     cursor_antes: str | None = None
     cursor_depois: str | None = None
+    data: str = ""
+    tipo_dia: str = ""
+    politica_selecao: str = ""
+    selecionado: str | None = None
+    motivo_escolha: str = ""
+    obrigacao_satisfeita: str = ""
+    prioridade_selecionado: int | None = None
+    hierarquia: list[str] = field(default_factory=list)
     avaliacoes: list[CandidateEvaluation] = field(default_factory=list)

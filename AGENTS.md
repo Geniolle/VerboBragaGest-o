@@ -32,6 +32,10 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   (`LOG_AUDITORIA`/`CLAUDE_LOG_AUDITORIA`) com `CONSOME_HIERARQUIA=TRUE`.
   Não implemente cursor mensal baseado em variável global, cache local ou
   estado de processo.
+- Histórico já persistido não deve ser recalculado para reconstruir decisões
+  passadas quando o dado real existe. Em particular, a sequência histórica da
+  CEIA de DOMINGO vem dos vencedores persistidos confirmados por auditoria,
+  não de replay do motor atual sobre Rondas antigas.
 - Em DOMINGO, CEIA e MINISTRO compartilham a contagem de participação mensal
   para `REPETIÇÃO MENSAL`: uma CEIA já conta como uma ocorrência do mês.
   Isso não altera a regra anterior de cursor: CEIA continua com ciclo próprio
@@ -45,6 +49,11 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   `EVERY_MONTH_OBLIGATION` ou `GAP_FILL`. `GAP_FILL` explica a existência da
   vaga, mas só pode escolher pessoa por uma política explícita; não invente
   uma hierarquia paralela implícita.
+- Para investigar uma decisão de DOMINGO, use o trace read-only do domínio
+  (`scripts/diagnosticar_alocacao_domingo.py --data AAAA-MM-DD`) antes de
+  editar regras. O diagnóstico deve mostrar candidatos avaliados, motivos de
+  rejeição, quota mensal, intenção, política de seleção e cursor antes/depois,
+  reutilizando as mesmas políticas do motor.
 - Regras novas não devem ser implementadas como um `if` solto no motor antes
   de identificar a que conceito do domínio pertencem: elegibilidade,
   obrigação, ranking/hierarquia, intenção da vaga, transição de estado ou
@@ -54,6 +63,11 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
 - DOMINGO e QUARTA-FEIRA são contextos distintos. P1/P2/P3 pertencem ao
   domínio de QUARTA-FEIRA (tema/nível/classificação) e não devem ser usados
   como nome para a hierarquia numérica de DOMINGO, que é prioridade/ordem.
+  Mantenha os processos separados: mudanças no histórico/ciclo de CEIA,
+  cursor de DOMINGO ou replay de Rondas de DOMINGO não podem ser reaproveitadas
+  implicitamente em QUARTA-FEIRA. QUARTA-FEIRA usa seus próprios conceitos de
+  tema, nível e rodízio; se precisar de reconstrução histórica ali, trate como
+  fluxo próprio, com testes próprios.
 - `GRUPOS_VALIDADOS.md` é o registo oficial de quais combinações
   `DEPARTAMENTO###FUNÇÃO###DIA DA SEMANA` já tiveram pelo menos um teste de
   integração real revisado por humano.

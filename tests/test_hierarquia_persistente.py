@@ -9,7 +9,7 @@ from pastoreio_orquestrador.auditoria import (
 )
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
 from pastoreio_orquestrador.models import RegraColaborador, SlotAgenda
-from pastoreio_orquestrador.motor import EstadoExecucaoGrupo, alocar_grupo
+from pastoreio_orquestrador.motor import EstadoExecucaoGrupo, alocar_grupo, diagnosticar_escolha_slot
 
 
 DEP, FUNCAO, DIA, COLUNA = "D. MINISTROS", "MINISTRO", "DOMINGO", "MINISTRO"
@@ -151,6 +151,34 @@ def test_candidato_analisado_inelegivel_nao_consumido_proximo_elegivel_consumido
     assert estado.cursor_hierarquia == "P4"
 
 
+def test_diagnostico_domingo_nao_altera_estado_e_explica_rejeicoes():
+    regras = [_regra("P1", 1), _regra("P2", 2), _regra("P3", 3, semana=5), _regra("P4", 4)]
+    estado = EstadoExecucaoGrupo(cursor_hierarquia="P2")
+    slot = _slot(10, date(2027, 1, 10))
+
+    trace = diagnosticar_escolha_slot(
+        regras,
+        slot,
+        estado,
+        {r.nome: 10 for r in regras},
+        mapa_limites_mensais={r.nome: 1 for r in regras},
+    )
+
+    assert trace.selecionado == "P4"
+    assert trace.cursor_antes == "P2"
+    assert trace.cursor_depois == "P4"
+    assert estado.cursor_hierarquia == "P2"
+    assert estado.uso_por_mes == {}
+    assert [a.candidato for a in trace.avaliacoes if a.passada == "NORMAL"] == ["P3", "P4", "P1", "P2"]
+    rejeitado = [a for a in trace.avaliacoes if a.candidato == "P3"][0]
+    assert rejeitado.elegivel is False
+    assert "fora da semana preferencial" in rejeitado.motivos_rejeicao
+
+    decisao_motor, _estado_motor = _alocar_um(regras, "P2", slot.data)
+    assert trace.selecionado == decisao_motor.vencedor
+    assert str(trace.intent) == decisao_motor.intent
+
+
 def test_wraparound_depois_do_ultimo_elemento():
     regras = [_regra("P1", 1), _regra("P2", 2), _regra("P3", 3)]
     cursor = _resolver(
@@ -284,6 +312,12 @@ def test_repeticao_mensal_intercalada_nao_move_cursor_outubro():
     )
 
     assert [d.vencedor for d in decisoes] == ["Clayton", "Patricia", "Clayton", "Caio"]
+    assert [d.motivo for d in decisoes] == [
+        "ALOCAÇÃO NORMAL",
+        "ALOCAÇÃO NORMAL",
+        "REPETIÇÃO MENSAL",
+        "ALOCAÇÃO NORMAL",
+    ]
     assert [d.tipo_alocacao for d in decisoes] == ["NORMAL", "NORMAL", "REPETICAO_MENSAL", "NORMAL"]
     assert [d.consome_hierarquia for d in decisoes] == [True, True, False, True]
     assert estado.cursor_hierarquia == "Caio"
@@ -370,6 +404,14 @@ def test_duas_repeticoes_intercaladas_nao_alteram_sequencia_normal():
     )
 
     assert [d.vencedor for d in decisoes] == ["P1", "P2", "P1", "P3", "P1", "P4"]
+    assert [d.motivo for d in decisoes] == [
+        "ALOCAÇÃO NORMAL",
+        "ALOCAÇÃO NORMAL",
+        "REPETIÇÃO MENSAL",
+        "ALOCAÇÃO NORMAL",
+        "REPETIÇÃO MENSAL",
+        "ALOCAÇÃO NORMAL",
+    ]
     assert [d.tipo_alocacao for d in decisoes] == [
         "NORMAL",
         "NORMAL",

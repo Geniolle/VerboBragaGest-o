@@ -1,7 +1,15 @@
 from datetime import date
 
+from pastoreio_orquestrador.carregamento import (
+    carregar_historico_ceia_persistido,
+    carregar_historico_coluna_agenda,
+)
 from pastoreio_orquestrador.models import RegraColaborador, SlotAgenda
-from pastoreio_orquestrador.motor import EstadoExecucaoGrupo, alocar_grupo
+from pastoreio_orquestrador.motor import (
+    EstadoExecucaoGrupo,
+    alocar_grupo,
+    calcular_participantes_ciclo_ceia,
+)
 from pastoreio_orquestrador.parsing_utils import week_of_month
 
 
@@ -371,6 +379,271 @@ def test_cenario_3_todos_participantes_ceia_ja_participaram_inicia_novo_ciclo():
     # Novo ciclo inicia: o de maior prioridade (ColabA) e escolhido
     assert decisoes[0].vencedor == "ColabA"
     assert decisoes[0].motivo == "CEIA ALTERNADA"
+
+
+def test_ceia_ultimo_pendente_fecha_ciclo():
+    regras = [
+        _regra("A", prioridade=1),
+        _regra("B", prioridade=2),
+        _regra("C", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["A", "B", "C"])
+
+    decisoes = alocar_grupo(regras, [_slot(1, date(2027, 4, 4))], estado, {})
+
+    assert decisoes[0].vencedor == "D"
+    assert calcular_participantes_ciclo_ceia(
+        {"A", "B", "C", "D"}, estado.historico_vencedores_ceia
+    ) == set()
+
+
+def test_ceia_ciclo_completo_recomeca_no_primeiro_da_ordem():
+    regras = [
+        _regra("A", prioridade=1),
+        _regra("B", prioridade=2),
+        _regra("C", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["A", "B", "C", "D"])
+
+    decisoes = alocar_grupo(regras, [_slot(1, date(2027, 5, 2))], estado, {})
+
+    assert decisoes[0].vencedor == "A"
+    assert decisoes[0].motivo == "CEIA ALTERNADA"
+
+
+def test_ceia_dois_ciclos_completos_sem_repetir_ultimo_no_reset():
+    regras = [
+        _regra("A", prioridade=1),
+        _regra("B", prioridade=2),
+        _regra("C", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+    slots = [
+        _slot(1, date(2027, 1, 3)),
+        _slot(2, date(2027, 2, 7)),
+        _slot(3, date(2027, 3, 7)),
+        _slot(4, date(2027, 4, 4)),
+        _slot(5, date(2027, 5, 2)),
+        _slot(6, date(2027, 6, 6)),
+        _slot(7, date(2027, 7, 4)),
+        _slot(8, date(2027, 8, 1)),
+    ]
+
+    limites = {"A": 10, "B": 10, "C": 10, "D": 10}
+
+    decisoes = alocar_grupo(regras, slots, EstadoExecucaoGrupo(), limites)
+
+    assert [d.vencedor for d in decisoes] == ["A", "B", "C", "D", "A", "B", "C", "D"]
+
+
+def test_ceia_cenario_real_davi_fecha_ciclo_maio_recomeca_primeiro():
+    regras = [
+        _regra("Clayton Lopes", prioridade=1),
+        _regra("Patricia Lopes", prioridade=2),
+        _regra("Caio Lima", prioridade=3),
+        _regra("Ana Lima", prioridade=4),
+        _regra("Andre Luiz", prioridade=5),
+        _regra("Suzana Fonseca", prioridade=6),
+        _regra("Davi Fenner", prioridade=7),
+    ]
+    estado = EstadoExecucaoGrupo(
+        historico_vencedores_ceia=[
+            "Clayton Lopes",
+            "Patricia Lopes",
+            "Caio Lima",
+            "Ana Lima",
+            "Andre Luiz",
+            "Suzana Fonseca",
+        ]
+    )
+
+    abril = alocar_grupo(regras, [_slot(1, date(2027, 4, 4))], estado, {})
+    maio = alocar_grupo(regras, [_slot(2, date(2027, 5, 2))], estado, {})
+
+    assert abril[0].vencedor == "Davi Fenner"
+    assert maio[0].vencedor == "Clayton Lopes"
+
+
+def test_ceia_processo_reiniciado_reconstroi_ciclo_completo_da_agenda():
+    agenda = [
+        ["DATA", "DIA DA SEMANA", "CEIA"],
+        ["03/01/2027", "DOMINGO", "A"],
+        ["07/02/2027", "DOMINGO", "B"],
+        ["07/03/2027", "DOMINGO", "C"],
+        ["04/04/2027", "DOMINGO", "D"],
+        ["02/05/2027", "DOMINGO", ""],
+    ]
+    historico = carregar_historico_coluna_agenda(
+        agenda,
+        dia_da_semana="DOMINGO",
+        coluna_participacao="CEIA",
+        nomes_validos={"A": "A", "B": "B", "C": "C", "D": "D"},
+        somente_primeiro_domingo=True,
+        antes_de=date(2027, 5, 2),
+    )
+    regras = [
+        _regra("A", prioridade=1),
+        _regra("B", prioridade=2),
+        _regra("C", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+    assert historico == ["A", "B", "C", "D"]
+    estado_novo_processo = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    decisoes = alocar_grupo(regras, [_slot(5, date(2027, 5, 2))], estado_novo_processo, {})
+
+    assert decisoes[0].vencedor == "A"
+
+
+def test_ceia_domingo_reiniciado_usa_historico_persistido_e_nao_replay_incompleto():
+    agenda = [
+        ["DATA", "DIA DA SEMANA", "MINISTRO", "CEIA"],
+        ["04/10/2026", "DOMINGO", "A", ""],
+        ["01/11/2026", "DOMINGO", "B", ""],
+        ["06/12/2026", "DOMINGO", "C", ""],
+        ["03/01/2027", "DOMINGO", "D", ""],
+        ["07/02/2027", "DOMINGO", "E", ""],
+        ["07/03/2027", "DOMINGO", "F", ""],
+        ["04/04/2027", "DOMINGO", "G", ""],
+        ["02/05/2027", "DOMINGO", "", ""],
+    ]
+    auditoria = [
+        ["DATA_SLOT", "VENCEDOR", "MOTIVO", "INTENCAO_ALOCACAO", "TIPO_ALOCACAO"],
+        ["2026-10-04", "A", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-11-01", "B", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-12-06", "C", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2027-01-03", "D", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2027-02-07", "E", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2027-03-07", "F", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2027-04-04", "G", "CEIA ALTERNADA", "CEIA", "CEIA"],
+    ]
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABCDEFG", start=1)]
+
+    historico = carregar_historico_ceia_persistido(
+        agenda,
+        auditoria,
+        dia_da_semana="DOMINGO",
+        coluna_alocacao="MINISTRO",
+        nomes_validos={r.nome: r.nome for r in regras},
+        antes_de=date(2027, 5, 2),
+    )
+    assert historico == list("ABCDEFG")
+    estado_novo_processo = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    usados = calcular_participantes_ciclo_ceia(
+        {r.nome for r in regras if r.ceia_alternada},
+        estado_novo_processo.historico_vencedores_ceia,
+    )
+    decisoes = alocar_grupo(regras, [_slot(8, date(2027, 5, 2))], estado_novo_processo, {})
+
+    assert usados == set()
+    assert decisoes[0].vencedor == "A"
+    assert decisoes[0].vencedor != "G"
+
+
+def test_ceia_historico_persistido_de_dois_ciclos_completos_recomeca():
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABCD", start=1)]
+    historico = list("ABCDABCD")
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    usados = calcular_participantes_ciclo_ceia({r.nome for r in regras}, historico)
+    decisoes = alocar_grupo(regras, [_slot(9, date(2027, 9, 5))], estado, {})
+
+    assert usados == set()
+    assert decisoes[0].vencedor == "A"
+
+
+def test_ceia_historico_persistido_incompleto_mantem_pendente():
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABCD", start=1)]
+    historico = list("ABC")
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    usados = calcular_participantes_ciclo_ceia({r.nome for r in regras}, historico)
+    decisoes = alocar_grupo(regras, [_slot(10, date(2027, 4, 4))], estado, {})
+
+    assert usados == {"A", "B", "C"}
+    assert decisoes[0].vencedor == "D"
+
+
+def test_ceia_historico_com_novo_participante_configurado_pede_o_novo_nome():
+    # O passado A-B-C-D nao e reescrito. Com E ativo hoje, o ciclo vigente e
+    # avaliado contra o conjunto atual A-B-C-D-E, entao E fica pendente.
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABCDE", start=1)]
+    historico = list("ABCD")
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    usados = calcular_participantes_ciclo_ceia({r.nome for r in regras}, historico)
+    decisoes = alocar_grupo(regras, [_slot(11, date(2027, 5, 2))], estado, {})
+
+    assert usados == {"A", "B", "C", "D"}
+    assert decisoes[0].vencedor == "E"
+
+
+def test_ceia_historico_com_participante_desativado_nao_quebra_e_usa_conjunto_atual():
+    # D participou no passado, mas nao esta no conjunto CEIA atual. O ciclo e
+    # calculado contra A-B-C; ao ler A-B-C o ciclo atual fecha e a proxima
+    # CEIA comeca de novo pela ordem vigente.
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABC", start=1)]
+    historico = list("ABCD")
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+
+    usados = calcular_participantes_ciclo_ceia({r.nome for r in regras}, historico)
+    decisoes = alocar_grupo(regras, [_slot(12, date(2027, 5, 2))], estado, {})
+
+    assert usados == set()
+    assert decisoes[0].vencedor == "A"
+
+
+def test_ceia_primeiro_do_novo_ciclo_bloqueado_nao_e_marcado_como_usado():
+    regras = [
+        _regra("A", prioridade=1),
+        _regra("B", prioridade=2),
+        _regra("C", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["A", "B", "C", "D"])
+    excluse_header = {"COLUNAS": 0, "ID_MINISTROS": 1}
+    excluse_rows = [["MINISTRO", "BLOQUEIO_A"]]
+    slot_bloqueado = SlotAgenda(
+        row_index=10,
+        data=date(2027, 5, 2),
+        dia_da_semana="DOMINGO",
+        tema="",
+        mes_key="2027-05",
+        semana_do_mes=1,
+        is_ultima_ocorrencia_do_mes=False,
+        papeis={"BLOQUEIO_A": "A"},
+    )
+
+    decisoes = alocar_grupo(
+        regras,
+        [slot_bloqueado],
+        estado,
+        {},
+        excluse_header=excluse_header,
+        excluse_rows=excluse_rows,
+    )
+
+    assert decisoes[0].vencedor == "B"
+    usados = calcular_participantes_ciclo_ceia({"A", "B", "C", "D"}, estado.historico_vencedores_ceia)
+    assert usados == {"B"}
+    assert "A" not in usados
+
+
+def test_ceia_novo_ciclo_usa_ordem_atual_quando_configuracao_muda():
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=["A", "B", "C", "D"])
+    regras_ordem_atual = [
+        _regra("C", prioridade=1),
+        _regra("A", prioridade=2),
+        _regra("B", prioridade=3),
+        _regra("D", prioridade=4),
+    ]
+
+    decisoes = alocar_grupo(regras_ordem_atual, [_slot(1, date(2027, 5, 2))], estado, {})
+
+    assert decisoes[0].vencedor == "C"
 
 
 def test_cenario_4_domingo_nao_primeiro_semana_preferencial_vence_prioridade():

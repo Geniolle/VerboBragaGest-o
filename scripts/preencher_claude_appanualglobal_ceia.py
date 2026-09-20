@@ -43,8 +43,8 @@ from datetime import date
 
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
-    carregar_emails, carregar_excluse_matriz, carregar_regras_colaboradores,
-    carregar_zumbis_prioritarios, extrair_assiduidade_da_linha,
+    carregar_emails, carregar_excluse_matriz, carregar_historico_coluna_agenda,
+    carregar_regras_colaboradores, carregar_zumbis_prioritarios, extrair_assiduidade_da_linha,
     extrair_papeis_da_linha, get,
 )
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
@@ -180,6 +180,16 @@ def main() -> None:
     if ronda_para_escrever is None:
         print("Nenhuma Ronda com CEIA vazia encontrada (tudo ja preenchido ate onde ha dados). Fim.")
         return
+
+    nomes_validos = {r.nome.strip().upper(): r.nome for r in grupo}
+    estado.historico_vencedores_ceia = carregar_historico_coluna_agenda(
+        agenda_raw,
+        dia_da_semana=DIA,
+        coluna_participacao=COL_NOME,
+        nomes_validos=nomes_validos,
+        somente_primeiro_domingo=True,
+        antes_de=ronda_para_escrever[0],
+    )
 
     print(f"N (colaboradores ativos no grupo) = {n_ativos}")
     print(f"Ronda a escrever: {len(ronda_para_escrever)} 1o-domingo(s) do mes "

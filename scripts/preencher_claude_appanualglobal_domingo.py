@@ -57,7 +57,7 @@ from pastoreio_orquestrador.auditoria import (
 from pastoreio_orquestrador.carregamento import (
     build_header_index, carregar_aniversarios, carregar_bp_log,
     carregar_compromissos_cruzados, carregar_emails, carregar_excluse_matriz,
-    carregar_regras_colaboradores, carregar_zumbis_prioritarios,
+    carregar_historico_ceia_persistido, carregar_regras_colaboradores, carregar_zumbis_prioritarios,
     contar_ocorrencias_mensais_por_colaborador,
     extrair_assiduidade_da_linha, extrair_papeis_da_linha, get,
 )
@@ -74,7 +74,7 @@ from pastoreio_orquestrador.parsing_utils import (
 from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 DEPARTAMENTO, FUNCAO, DIA = "D. MINISTROS", "MINISTRO", "DOMINGO"
-AGENDA_TITLE = "CLAUDE_AppAnualGlobal"
+AGENDA_TITLE = "AppAnualGlobal"
 COL_NOME = "MINISTRO"
 
 
@@ -253,10 +253,23 @@ def main() -> None:
         print("Continuidade da hierarquia: nenhuma ancora persistida valida; inicio pela hierarquia atual.\n")
     for diagnostico in cursor.diagnosticos:
         print(f"  Diagnostico cursor: {diagnostico}")
-    # O replay acima alimenta CEIA, lacuna, cotas e descanso a partir das
-    # Rondas fechadas. Para a hierarquia normal mensal, a fonte de verdade e
-    # agenda + auditoria; portanto restauramos a ancora reconstruida antes de
-    # calcular a Ronda aberta.
+    primeira_data_aberta = min(d for d in ronda_para_escrever if not valor_por_data[d])
+    historico_ceia_persistido = carregar_historico_ceia_persistido(
+        agenda_raw,
+        auditoria_raw,
+        dia_da_semana=DIA,
+        coluna_alocacao=COL_NOME,
+        nomes_validos={nome: regra.nome for nome, regra in regras_por_nome.items()},
+        antes_de=primeira_data_aberta,
+    )
+    # O replay acima continua alimentando lacuna, cotas e descanso a partir
+    # das Rondas fechadas. A CEIA historica, porem, vem dos vencedores reais
+    # persistidos em agenda + auditoria, para que uma regra nova nunca
+    # reescreva conceitualmente o passado nem duplique CEIAs ja gravadas.
+    estado.historico_vencedores_ceia = historico_ceia_persistido
+    # Para a hierarquia normal mensal, a fonte de verdade e agenda +
+    # auditoria; portanto restauramos a ancora reconstruida antes de calcular
+    # a Ronda aberta.
     estado.cursor_hierarquia = cursor.ancora
     estado.cursor_hierarquia_referencia = cursor.ancora
     estado.cursor_hierarquia_referencia_fixada = True

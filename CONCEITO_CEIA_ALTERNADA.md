@@ -41,8 +41,11 @@ Se o grupo tem $N$ colaboradores com CEIA ativa:
 4. **Historico persistente**: o algoritmo olha para tras (historico das Rondas/meses
    anteriores via `estado.historico_vencedores_ceia` e a funcao
    `calcular_participantes_ciclo_ceia`) para descobrir quem ja participou no
-   ciclo atual e quem ainda falta. Nao e necessario preencher todos os meses
-   de uma vez.
+   ciclo atual e quem ainda falta. Entre execucoes, esse historico vem dos
+   vencedores reais ja persistidos em agenda, confirmados por auditoria/
+   intencao `CEIA`; nao e recalculado pelo motor atual como se o passado
+   ainda estivesse aberto. Nao e necessario preencher todos os meses de uma
+   vez.
 5. **Filtros continuam obrigatorios**: impedimentos reais (Excluse, aniversario,
    descanso cruzado, vizinhanca) continuam eliminando candidatos no dia da vaga.
    Se a pessoa da vez estiver impedida, o motor busca o proximo elegivel dentro
@@ -51,6 +54,21 @@ Se o grupo tem $N$ colaboradores com CEIA ativa:
 6. **Desempate no ciclo**: entre os candidatos elegiveis do ciclo que ainda nao
    participaram, a ordem de escolha segue a `PRIORIDADE NA ALOCACAO` (menor
    numero = maior prioridade).
+
+Quando todos os participantes vigentes com `CEIA ALTERNADA=true` ja aparecem
+no ciclo atual, esse ciclo fecha imediatamente. A proxima CEIA inicia um novo
+ciclo do inicio da ordem vigente; o ultimo participante do ciclo anterior nao
+vira ancora nem tem preferencia para repetir. Se o primeiro da ordem estiver
+bloqueado por impedimento real naquela data, o motor avalia o proximo
+elegivel, e o bloqueado continua pendente.
+
+O ciclo e sempre calculado contra o conjunto vigente de participantes com
+`CEIA ALTERNADA=true`, sem reescrever o passado:
+
+- se um novo participante entra no cadastro, ele fica pendente ate participar;
+- se um participante historico deixou de ter `CEIA ALTERNADA=true`, seu nome
+  continua no historico real, mas deixa de contar como pendencia do conjunto
+  atual.
 
 ## Onde vive no codigo
 
@@ -63,6 +81,12 @@ Se o grupo tem $N$ colaboradores com CEIA ativa:
   `src/pastoreio_orquestrador/motor.py`: percorre o historico cronologico,
   detectando os ciclos completos e devolvendo o conjunto de quem ja participou
   no ciclo atual incompleto.
+- `carregar_historico_ceia_persistido(...)` em
+  `src/pastoreio_orquestrador/carregamento.py`: reconstrói, entre execucoes,
+  a sequencia cronologica da CEIA a partir do vencedor persistido em agenda
+  confirmado por auditoria/intencao `CEIA`. Esta funcao existe para evitar
+  que replay de Rondas antigas com uma versao nova do algoritmo altere o
+  significado de uma CEIA que ja aconteceu.
 - `eh_slot_ceia(slot: SlotAgenda) -> bool`: verifica se `slot.semana_do_mes == 1`
   e dia e `DOMINGO`.
 - `avaliar_candidatos_para_slot` em `motor.py`:

@@ -243,6 +243,25 @@ Assim, uma lacuna responde "por que esta data precisa ser preenchida"; a
 política de seleção responde "como escolhemos a pessoa". Auditoria e
 diagnósticos devem registrar os dois campos separadamente.
 
+## Diagnóstico estruturado de uma alocação de DOMINGO
+
+Para investigar uma data específica de DOMINGO sem alterar estado, use:
+
+```
+uv run python scripts/diagnosticar_alocacao_domingo.py --data AAAA-MM-DD
+```
+
+O diagnóstico é read-only e reutiliza a política do motor
+(`diagnosticar_escolha_slot`). Ele mostra `TIPO_DIA`, intenção da vaga,
+política de seleção, cursor antes/depois, hierarquia carregada do
+BP ALGORITIMO, candidatos avaliados por passada (`NORMAL`, eventual quebra de
+rodízio de nível, `RESGATE`), motivos de rejeição, quota mensal, CEIA no mês
+e vencedor.
+
+Use este trace antes de alterar regra: se a passada normal falhou por filtros
+reais e o RESGATE escolheu o primeiro elegível do pool permitido, não há
+correção de política a fazer apenas porque o resultado parece inesperado.
+
 ### Por que isso garante o comportamento de "ALOCAR TODOS OS MESES + preferência = sempre o primeiro escolhido"
 
 Combinando a etapa 1.8 (filtro obrigatório) com a etapa 2.2 (rank 0 sempre

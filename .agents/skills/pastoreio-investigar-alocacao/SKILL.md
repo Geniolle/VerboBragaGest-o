@@ -23,6 +23,23 @@ campo, resultado de uma chamada de função) — nunca uma suposição sobre "o
 que provavelmente aconteceu". Se a causa não está clara a partir dos dados,
 diga isso explicitamente em vez de inventar uma explicação plausível.
 
+## Diagnóstico padrão para DOMINGO
+
+Quando a pergunta for sobre `D. MINISTROS / MINISTRO / DOMINGO`, comece pelo
+trace read-only:
+
+```
+uv run python scripts/diagnosticar_alocacao_domingo.py --data AAAA-MM-DD
+```
+
+O comando não escreve em nenhuma aba. Ele lê as fontes atuais, simula em
+memória e usa `diagnosticar_escolha_slot` do domínio para mostrar:
+histórico de CEIA persistido, participantes atuais, ciclo atual, `TIPO_DIA`,
+intenção, política de seleção, cursor antes/depois, hierarquia, candidatos
+avaliados, motivos de rejeição, quota mensal, CEIA no mês e vencedor. Use
+esse trace como evidência primária antes de levantar hipótese ou alterar
+regra.
+
 ## Onde procurar evidência, por categoria
 
 Percorra estes pontos na ordem em que `motor.py` os aplica (etapa 1 =
@@ -62,7 +79,10 @@ filtros obrigatórios, etapa 2 = desempate — ver `CONCEITO_PRIORIDADES.md`):
     obrigatório para concorrer; ciclo completo entre todos os membros com
     CEIA ALTERNADA via `calcular_participantes_ciclo_ceia` /
     `estado.historico_vencedores_ceia`; sobrepõe semana preferencial e
-    prioridade. Ver `CONCEITO_CEIA_ALTERNADA.md`.
+    prioridade. Em nova execução, esse histórico deve vir dos vencedores
+    reais persistidos na agenda confirmados por auditoria/intenção `CEIA`,
+    nunca de recalcular Rondas antigas com o motor atual. Ver
+    `CONCEITO_CEIA_ALTERNADA.md`.
 11. **Resgate**: se ninguém sobreviveu à passada normal, o motor tenta de
     novo com `ignorar_vizinhanca_e_descanso=True` — só quem tem
     `ALOCAR TODOS OS MESES=false` **e** `ALOCAÇÃO EXTRA=true` participa, e
@@ -107,12 +127,12 @@ Se auditoria e agenda divergirem, reporte inconsistência em vez de inferir
 o cursor por nome ou prioridade.
 
 Para diagnosticar uma Ronda de DOMINGO sem escrever, use
-`scripts/diagnosticar_cursor_domingo.py`: ele mostra data, tipo de decisão,
-intenção da vaga, obrigação satisfeita, `CONSOME_HIERARQUIA`, cursor
-antes/depois e candidatos avaliados. Lembre que candidato analisado e
-rejeitado não consome cursor; repetição mensal, obrigação de
-`ALOCAR TODOS OS MESES`, CEIA, resgate e lacuna também não avançam a
-hierarquia normal.
+`scripts/diagnosticar_cursor_domingo.py` ou
+`scripts/diagnosticar_domingo_hierarquia.py` como visão agregada; para uma
+data específica, prefira `scripts/diagnosticar_alocacao_domingo.py`. Lembre
+que candidato analisado e rejeitado não consome cursor; repetição mensal,
+obrigação de `ALOCAR TODOS OS MESES`, CEIA, resgate e lacuna também não
+avançam a hierarquia normal.
 
 Ao investigar domingos, separe sempre `TIPO_DIA`, intenção e política de
 seleção. `DOMINGO_NORMAL` não significa automaticamente `NORMAL_ROTATION`:

@@ -48,6 +48,10 @@ fonte de verdade.
    Também preserve a separação entre cursor e quota mensal: CEIA tem ciclo
    próprio e `CONSOME_HIERARQUIA=FALSE`, mas conta como ocorrência mensal
    para `REPETIÇÃO MENSAL` no contexto DOMINGO/MINISTRO.
+   Ao tocar reconstrução entre execuções, não recalcule decisões passadas
+   quando o resultado real já existe: a CEIA histórica de DOMINGO deve ser
+   carregada da agenda persistida confirmada por auditoria/intenção `CEIA`,
+   e só depois comparada com o conjunto atual `CEIA ALTERNADA=true`.
    A fila normal deve usar o cursor normal atual; obrigações mensais
    (`REPETIÇÃO MENSAL` e `ALOCAR TODOS OS MESES`) não podem reposicionar esse
    cursor. Candidato só analisado/rejeitado também não é consumido.
@@ -56,7 +60,10 @@ fonte de verdade.
    transição de estado ou auditoria. Para DOMINGO, prefira políticas pequenas
    em `src/pastoreio_orquestrador/domain/domingo/`; para QUARTA-FEIRA,
    preserve os conceitos próprios de tema/nível (P1/P2/P3 não são nomes da
-   hierarquia de DOMINGO).
+   hierarquia de DOMINGO). Não leve reconstrução de CEIA, cursor normal de
+   DOMINGO ou replay de Rondas de DOMINGO para QUARTA-FEIRA; se o fluxo de
+   QUARTA-FEIRA precisar evoluir, modele-o como processo próprio, com dados,
+   estado e testes próprios.
    Em DOMINGO, não confunda `TIPO_DIA` com motivo/intenção: um
    `DOMINGO_NORMAL` pode ser rotação normal, repetição mensal, obrigação de
    todos-os-meses ou lacuna. Se a intenção for `GAP_FILL`, defina também a

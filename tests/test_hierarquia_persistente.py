@@ -114,6 +114,57 @@ def test_nova_execucao_comeca_depois_da_ultima_prioridade_consumida():
     assert decisao.vencedor == "P3"
 
 
+def test_cursor_ignora_ancoras_anteriores_a_data_corte_historico():
+    regras = [_regra("A", 1), _regra("B", 2), _regra("C", 3)]
+
+    cursor = resolver_ultimo_cursor_hierarquia(
+        _agenda((date(2026, 9, 20), "A"), (date(2026, 9, 27), "B")),
+        _audit(
+            (date(2026, 9, 20), "A", True, "ALOCAÇÃO NORMAL"),
+            (date(2026, 9, 27), "B", True, "ALOCAÇÃO NORMAL"),
+        ),
+        regras,
+        DEP,
+        FUNCAO,
+        DIA,
+        COLUNA,
+        data_corte_historico=date(2026, 10, 1),
+    )
+
+    assert cursor.ancora is None
+    assert cursor.proximo_candidato.nome == "A"
+    assert cursor.registros_validos == []
+    assert cursor.registros_ignorados_antes_corte == 2
+
+
+def test_cursor_usa_primeira_ancora_valida_depois_da_data_corte_historico():
+    regras = [_regra("A", 1), _regra("B", 2), _regra("C", 3)]
+
+    cursor = resolver_ultimo_cursor_hierarquia(
+        _agenda(
+            (date(2026, 9, 20), "A"),
+            (date(2026, 9, 27), "B"),
+            (date(2026, 10, 11), "C"),
+        ),
+        _audit(
+            (date(2026, 9, 20), "A", True, "ALOCAÇÃO NORMAL"),
+            (date(2026, 9, 27), "B", True, "ALOCAÇÃO NORMAL"),
+            (date(2026, 10, 11), "C", True, "ALOCAÇÃO NORMAL"),
+        ),
+        regras,
+        DEP,
+        FUNCAO,
+        DIA,
+        COLUNA,
+        data_corte_historico=date(2026, 10, 1),
+    )
+
+    assert cursor.ancora == "C"
+    assert cursor.proximo_candidato.nome == "A"
+    assert [r.vencedor for r in cursor.registros_validos] == ["C"]
+    assert cursor.registros_ignorados_antes_corte == 2
+
+
 def test_repeticao_mensal_posterior_nao_move_cursor():
     regras = [_regra("P1", 1), _regra("P2", 2), _regra("P3", 3)]
     agenda = _agenda((date(2026, 12, 20), "P2"), (date(2026, 12, 27), "P1"))

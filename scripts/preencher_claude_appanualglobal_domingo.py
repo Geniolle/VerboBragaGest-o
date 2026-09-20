@@ -119,6 +119,7 @@ def main() -> None:
     writable_original_titles = {agenda_title, auditoria_title} if args.produtivo else set()
 
     settings = load_settings()
+    data_corte_historico = settings.data_corte_historico
     guard = SpreadsheetGuard(
         settings,
         writable_original_titles=writable_original_titles,
@@ -128,6 +129,8 @@ def main() -> None:
     print(f"Modo de escrita: {modo}")
     print(f"Agenda: {agenda_title}")
     print(f"Auditoria: {auditoria_title}\n")
+    print(f"DATA CORTE DO HISTORICO: {data_corte_historico.strftime('%d/%m/%Y')}")
+    print("Estado rotacional anterior a data de corte sera ignorado.\n")
 
     regras_raw = guard.read_worksheet(bp_algoritmo_title)
     agenda_raw = guard.read_worksheet(agenda_title)
@@ -168,6 +171,7 @@ def main() -> None:
         DIA,
         ("CEIA",),
         nomes_validos={nome: regra.nome for nome, regra in regras_por_nome.items()},
+        data_corte_historico=data_corte_historico,
     )
 
     bp_log = carregar_bp_log(bp_log_raw)
@@ -181,6 +185,7 @@ def main() -> None:
         DIA,
         COL_NOME,
         falhar_em_inconsistencia=not args.produtivo,
+        data_corte_historico=data_corte_historico,
     )
 
     # Todos os domingos do grupo na sheet (passado e futuro), com o valor
@@ -207,7 +212,11 @@ def main() -> None:
     # Recorta a sequencia inteira de Rondas (blocos de n_ativos domingos,
     # estendidos ate fechar o mes) na ordem em que foram/serao preenchidas.
     todas_as_datas = [d for _, d, _ in linhas_agenda]
-    restantes = todas_as_datas[:]
+    datas_rotacionais = [d for d in todas_as_datas if d >= data_corte_historico]
+    if not datas_rotacionais:
+        print("Nenhum domingo dentro do historico do novo motor. Fim.")
+        return
+    restantes = datas_rotacionais[:]
     blocos: list[list[date]] = []
     while restantes:
         bloco = delimitar_uma_ronda(restantes, n_colaboradores_ativos=n_ativos)
@@ -282,9 +291,17 @@ def main() -> None:
         proximo_nome = cursor.proximo_candidato.nome if cursor.proximo_candidato else "(sem candidato)"
         print(f"  Proximo candidato inicial: {proximo_nome}.\n")
     else:
-        print("Continuidade da hierarquia: nenhuma ancora persistida valida; inicio pela hierarquia atual.\n")
+        print(
+            "Continuidade da hierarquia: nenhuma ancora persistida valida apos a data de corte; "
+            "inicio pela hierarquia atual.\n"
+        )
     for diagnostico in cursor.diagnosticos:
         print(f"  Diagnostico cursor: {diagnostico}")
+    if cursor.registros_ignorados_antes_corte:
+        print(
+            "  Diagnostico cursor: "
+            f"{cursor.registros_ignorados_antes_corte} registro(s) rotacional(is) antes da data de corte ignorado(s)."
+        )
     primeira_data_aberta = min(d for d in ronda_para_escrever if not valor_por_data[d])
     historico_ceia_persistido = carregar_historico_ceia_persistido(
         agenda_raw,
@@ -293,7 +310,10 @@ def main() -> None:
         coluna_alocacao=COL_NOME,
         nomes_validos={nome: regra.nome for nome, regra in regras_por_nome.items()},
         antes_de=primeira_data_aberta,
+        data_corte_historico=data_corte_historico,
     )
+    print(f"CEIA: historico considerado a partir de {data_corte_historico.strftime('%d/%m/%Y')}.")
+    print(f"HIERARQUIA NORMAL: ancora considerada a partir de {data_corte_historico.strftime('%d/%m/%Y')}.\n")
     # O replay acima continua alimentando lacuna, cotas e descanso a partir
     # das Rondas fechadas. A CEIA historica, porem, vem dos vencedores reais
     # persistidos em agenda + auditoria, para que uma regra nova nunca
@@ -310,7 +330,7 @@ def main() -> None:
     print(f"Ronda candidata inicial: {len(ronda_para_escrever)} domingos "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
-    datas_abertas = [d for d in todas_as_datas if d >= ronda_para_escrever[0]]
+    datas_abertas = [d for d in datas_rotacionais if d >= ronda_para_escrever[0]]
     slots_abertos = [
         montar_slot(agenda_raw[row_por_data[d]], idx, row_por_data[d], d)
         for d in datas_abertas

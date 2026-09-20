@@ -12,6 +12,7 @@ from datetime import date, datetime
 from uuid import uuid4
 
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
+from pastoreio_orquestrador.historico import dentro_do_historico_do_novo_motor
 from pastoreio_orquestrador.models import DecisaoAlocacao, RegraColaborador
 from pastoreio_orquestrador.parsing_utils import parse_date_ddmmyyyy
 
@@ -74,6 +75,7 @@ class ResultadoCursorHierarquia:
     proximo_candidato: RegraColaborador | None
     registros_validos: list[RegistroAuditoria] = field(default_factory=list)
     diagnosticos: list[str] = field(default_factory=list)
+    registros_ignorados_antes_corte: int = 0
 
 
 class AuditoriaAgendaInconsistenteError(RuntimeError):
@@ -291,6 +293,7 @@ def resolver_ultimo_cursor_hierarquia(
     coluna_alocacao: str,
     *,
     falhar_em_inconsistencia: bool = True,
+    data_corte_historico: date | None = None,
 ) -> ResultadoCursorHierarquia:
     """Reconstrui a ultima ancora real da hierarquia normal.
 
@@ -302,9 +305,17 @@ def resolver_ultimo_cursor_hierarquia(
     diagnosticos e sao ignorados para o cursor.
     """
     agenda = _agenda_por_data(agenda_valores, dia_da_semana, coluna_alocacao)
-    registros = [
+    registros_carregados = [
         r for r in carregar_registros_auditoria(auditoria_valores, departamento, funcao, dia_da_semana)
         if r.consome_hierarquia
+    ]
+    registros_ignorados_antes_corte = sum(
+        1 for r in registros_carregados
+        if not dentro_do_historico_do_novo_motor(r.data_slot, data_corte_historico)
+    )
+    registros = [
+        r for r in registros_carregados
+        if dentro_do_historico_do_novo_motor(r.data_slot, data_corte_historico)
     ]
     registros.sort(key=lambda r: r.data_slot)
 
@@ -350,4 +361,5 @@ def resolver_ultimo_cursor_hierarquia(
         proximo_candidato=proximo,
         registros_validos=validos,
         diagnosticos=diagnosticos,
+        registros_ignorados_antes_corte=registros_ignorados_antes_corte,
     )

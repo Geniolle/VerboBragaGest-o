@@ -9,6 +9,7 @@ from pastoreio_orquestrador.motor import (
     EstadoExecucaoGrupo,
     alocar_grupo,
     calcular_participantes_ciclo_ceia,
+    esta_bloqueado_por_descanso_cruzado,
 )
 from pastoreio_orquestrador.parsing_utils import week_of_month
 
@@ -541,6 +542,88 @@ def test_ceia_domingo_reiniciado_usa_historico_persistido_e_nao_replay_incomplet
     assert usados == set()
     assert decisoes[0].vencedor == "A"
     assert decisoes[0].vencedor != "G"
+
+
+def test_ceia_historico_antes_da_data_corte_nao_entra_no_novo_motor():
+    agenda = [
+        ["DATA", "DIA DA SEMANA", "MINISTRO"],
+        ["02/08/2026", "DOMINGO", "Davi"],
+        ["06/09/2026", "DOMINGO", "Andre"],
+        ["04/10/2026", "DOMINGO", ""],
+    ]
+    auditoria = [
+        ["DATA_SLOT", "VENCEDOR", "MOTIVO", "INTENCAO_ALOCACAO", "TIPO_ALOCACAO"],
+        ["2026-08-02", "Davi", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-09-06", "Andre", "CEIA ALTERNADA", "CEIA", "CEIA"],
+    ]
+    regras = [_regra("Clayton", prioridade=1), _regra("Andre", prioridade=2), _regra("Davi", prioridade=3)]
+
+    historico = carregar_historico_ceia_persistido(
+        agenda,
+        auditoria,
+        dia_da_semana="DOMINGO",
+        coluna_alocacao="MINISTRO",
+        nomes_validos={r.nome.upper(): r.nome for r in regras},
+        antes_de=date(2026, 10, 4),
+        data_corte_historico=date(2026, 10, 1),
+    )
+    estado = EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico))
+    decisoes = alocar_grupo(regras, [_slot(1, date(2026, 10, 4))], estado, {})
+
+    assert historico == []
+    assert decisoes[0].vencedor == "Clayton"
+
+
+def test_ceia_ciclo_completo_depois_da_data_corte_recomeca_no_primeiro():
+    agenda = [
+        ["DATA", "DIA DA SEMANA", "MINISTRO"],
+        ["06/09/2026", "DOMINGO", "D"],
+        ["04/10/2026", "DOMINGO", "A"],
+        ["01/11/2026", "DOMINGO", "B"],
+        ["06/12/2026", "DOMINGO", "C"],
+        ["03/01/2027", "DOMINGO", "D"],
+        ["07/02/2027", "DOMINGO", ""],
+    ]
+    auditoria = [
+        ["DATA_SLOT", "VENCEDOR", "MOTIVO", "INTENCAO_ALOCACAO", "TIPO_ALOCACAO"],
+        ["2026-09-06", "D", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-10-04", "A", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-11-01", "B", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2026-12-06", "C", "CEIA ALTERNADA", "CEIA", "CEIA"],
+        ["2027-01-03", "D", "CEIA ALTERNADA", "CEIA", "CEIA"],
+    ]
+    regras = [_regra(nome, prioridade=i) for i, nome in enumerate("ABCD", start=1)]
+
+    historico = carregar_historico_ceia_persistido(
+        agenda,
+        auditoria,
+        dia_da_semana="DOMINGO",
+        coluna_alocacao="MINISTRO",
+        nomes_validos={r.nome: r.nome for r in regras},
+        antes_de=date(2027, 2, 7),
+        data_corte_historico=date(2026, 10, 1),
+    )
+    usados = calcular_participantes_ciclo_ceia({r.nome for r in regras}, historico)
+    decisoes = alocar_grupo(
+        regras,
+        [_slot(1, date(2027, 2, 7))],
+        EstadoExecucaoGrupo(historico_vencedores_ceia=list(historico)),
+        {},
+    )
+
+    assert historico == list("ABCD")
+    assert usados == set()
+    assert decisoes[0].vencedor == "A"
+
+
+def test_descanso_cruzado_consulta_fato_real_anterior_ao_corte():
+    bloqueado = esta_bloqueado_por_descanso_cruzado(
+        "Pessoa A",
+        date(2026, 10, 4),
+        {"PESSOA A": [date(2026, 9, 30)]},
+    )
+
+    assert bloqueado is True
 
 
 def test_ceia_historico_persistido_de_dois_ciclos_completos_recomeca():

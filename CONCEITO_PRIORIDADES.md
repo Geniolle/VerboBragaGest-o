@@ -155,6 +155,14 @@ sozinha: se o log disser que alguém consumiu a hierarquia mas a agenda não
 tiver essa alocação na mesma data/grupo/função, a execução deve gerar
 diagnóstico explícito.
 
+Para `D. MINISTROS / MINISTRO / DOMINGO`, essa reconstrução tem uma data de
+corte histórica configurada por `PASTOREIO_DATA_CORTE_HISTORICO`. O marco
+oficial atual é `2026-10-01`: decisões anteriores são legado do algoritmo
+antigo e não reconstruem cursor, ciclo de CEIA, replay de Rondas, lacunas,
+GAP_FILL/RESGATE ou cotas do novo motor. A agenda antiga continua sendo fato
+real para filtros temporais quando necessário (por exemplo, descanso cruzado
+com uma quarta-feira imediatamente antes do corte).
+
 ### O que consome a hierarquia normal
 
 Consome (`CONSOME_HIERARQUIA=TRUE`):

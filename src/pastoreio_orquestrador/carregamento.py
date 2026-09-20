@@ -16,6 +16,7 @@ from pastoreio_orquestrador.columns import (
     ColLivros,
     ColLogAlgoritimo,
 )
+from pastoreio_orquestrador.historico import dentro_do_historico_do_novo_motor
 from pastoreio_orquestrador.models import (
     RegistroBpLog,
     RegraColaborador,
@@ -361,6 +362,8 @@ def contar_ocorrencias_mensais_por_colaborador(
     dia_da_semana: str,
     colunas_participacao: list[str] | tuple[str, ...],
     nomes_validos: dict[str, str] | None = None,
+    *,
+    data_corte_historico: date | None = None,
 ) -> dict[str, dict[str, int]]:
     """Conta participacoes reais por colaborador+mes na AppAnualGlobal.
 
@@ -381,6 +384,8 @@ def contar_ocorrencias_mensais_por_colaborador(
             continue
         data = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
         if data is None:
+            continue
+        if not dentro_do_historico_do_novo_motor(data, data_corte_historico):
             continue
         mes = month_key(data)
         for coluna in colunas_participacao:
@@ -474,6 +479,7 @@ def carregar_historico_ceia_persistido(
     nomes_validos: dict[str, str] | None = None,
     *,
     antes_de: date | None = None,
+    data_corte_historico: date | None = None,
 ) -> list[str]:
     """Reconstrui a sequencia real de CEIA a partir de dados persistidos.
 
@@ -499,6 +505,8 @@ def carregar_historico_ceia_persistido(
         data = parse_date_ddmmyyyy(get(row, agenda_idx, ColAppAnualGlobal.DATA).strip())
         if data is None:
             continue
+        if not dentro_do_historico_do_novo_motor(data, data_corte_historico):
+            continue
         if antes_de is not None and data >= antes_de:
             continue
         nome = get(row, agenda_idx, coluna_alocacao).strip()
@@ -514,6 +522,8 @@ def carregar_historico_ceia_persistido(
             continue
         data = _parse_data_historico(_get_upper(row, auditoria_idx, "DATA_SLOT"))
         if data is None or data in datas_vistas:
+            continue
+        if not dentro_do_historico_do_novo_motor(data, data_corte_historico):
             continue
         if antes_de is not None and data >= antes_de:
             continue

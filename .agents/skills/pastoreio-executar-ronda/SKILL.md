@@ -110,6 +110,12 @@ Cada script de preenchimento, na prática:
    `CONSOME_HIERARQUIA=TRUE` confirmadas pela agenda real; CEIA, repetição
    mensal, ATM, resgate e lacuna não movem o cursor. Depois do replay,
    restaure essa âncora persistida antes de calcular a Ronda aberta.
+   Para `D. MINISTROS / MINISTRO / DOMINGO`, aplique a data configurada em
+   `PASTOREIO_DATA_CORTE_HISTORICO` (`2026-10-01` atualmente) a toda
+   reconstrução de estado rotacional: cursor, CEIA, replay, cotas, lacunas,
+   GAP_FILL e RESGATE. Não use essa data como filtro cego da agenda: fatos
+   reais anteriores ao corte ainda podem bloquear por descanso cruzado,
+   Excluse, aniversário ou indisponibilidade.
    Para o ciclo próprio da CEIA, carregue
    `estado.historico_vencedores_ceia` pelos vencedores reais persistidos
    (agenda confirmada por auditoria/intenção `CEIA`) antes da primeira data

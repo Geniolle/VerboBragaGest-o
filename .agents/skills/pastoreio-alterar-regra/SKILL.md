@@ -48,6 +48,12 @@ fonte de verdade.
    Também preserve a separação entre cursor e quota mensal: CEIA tem ciclo
    próprio e `CONSOME_HIERARQUIA=FALSE`, mas conta como ocorrência mensal
    para `REPETIÇÃO MENSAL` no contexto DOMINGO/MINISTRO.
+   Para `D. MINISTROS / MINISTRO / DOMINGO`, respeite
+   `PASTOREIO_DATA_CORTE_HISTORICO`: estado rotacional anterior ao corte é
+   legado e não deve reconstruir cursor, CEIA, replay, lacunas,
+   GAP_FILL/RESGATE ou cotas. Não aplique esse corte a fatos reais de agenda
+   usados por filtros temporais, como descanso cruzado, Excluse, aniversário
+   ou indisponibilidades.
    Ao tocar reconstrução entre execuções, não recalcule decisões passadas
    quando o resultado real já existe: a CEIA histórica de DOMINGO deve ser
    carregada da agenda persistida confirmada por auditoria/intenção `CEIA`,

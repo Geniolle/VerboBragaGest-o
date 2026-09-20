@@ -45,7 +45,10 @@ Se o grupo tem $N$ colaboradores com CEIA ativa:
    vencedores reais ja persistidos em agenda, confirmados por auditoria/
    intencao `CEIA`; nao e recalculado pelo motor atual como se o passado
    ainda estivesse aberto. Nao e necessario preencher todos os meses de uma
-   vez.
+   vez. Para `D. MINISTROS / MINISTRO / DOMINGO`, essa reconstrução respeita
+   `PASTOREIO_DATA_CORTE_HISTORICO` (`2026-10-01` no motor atual): CEIAs
+   anteriores ao corte continuam sendo histórico real na sheet, mas são
+   legado para o estado rotacional do novo motor.
 5. **Filtros continuam obrigatorios**: impedimentos reais (Excluse, aniversario,
    descanso cruzado, vizinhanca) continuam eliminando candidatos no dia da vaga.
    Se a pessoa da vez estiver impedida, o motor busca o proximo elegivel dentro
@@ -86,7 +89,9 @@ O ciclo e sempre calculado contra o conjunto vigente de participantes com
   a sequencia cronologica da CEIA a partir do vencedor persistido em agenda
   confirmado por auditoria/intencao `CEIA`. Esta funcao existe para evitar
   que replay de Rondas antigas com uma versao nova do algoritmo altere o
-  significado de uma CEIA que ja aconteceu.
+  significado de uma CEIA que ja aconteceu. No fluxo DOMINGO/MINISTRO, ela
+  recebe a data de corte histórica para ignorar CEIAs legadas na reconstrução
+  do estado do novo motor.
 - `eh_slot_ceia(slot: SlotAgenda) -> bool`: verifica se `slot.semana_do_mes == 1`
   e dia e `DOMINGO`.
 - `avaliar_candidatos_para_slot` em `motor.py`:

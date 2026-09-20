@@ -11,8 +11,15 @@ em nenhuma aba.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 
+from pastoreio_orquestrador.domain.common.decisions import AllocationIntent
+from pastoreio_orquestrador.domain.domingo.policies import (
+    obrigacao_satisfeita_por_intencao,
+    politica_selecao_por_intencao,
+)
 from pastoreio_orquestrador.carregamento import (
     build_header_index,
     carregar_aniversarios,
@@ -75,8 +82,15 @@ def montar_slot(row: list[str], idx: dict[str, int], row_i: int, data_slot: date
     )
 
 
-def imprimir_ceia(historico_ceia, participantes_ceia, usados_ciclo, primeiro_candidato) -> None:
-    print("HISTORICO CEIA PERSISTIDO:")
+def imprimir_ceia(
+    historico_ceia,
+    participantes_ceia,
+    usados_ciclo,
+    primeiro_candidato,
+    data_corte_historico,
+    registros_rotacionais_ignorados,
+) -> None:
+    print(f"HISTORICO CEIA PERSISTIDO (desde {data_corte_historico.isoformat()}):")
     if historico_ceia:
         for nome in historico_ceia:
             print(f"- {nome}")
@@ -100,6 +114,7 @@ def imprimir_ceia(historico_ceia, participantes_ceia, usados_ciclo, primeiro_can
     for regra in participantes_ceia:
         print(f"- {regra.nome}")
     print(f"PRIMEIRO CANDIDATO: {primeiro_candidato or '(sem candidato)'}")
+    print(f"REGISTROS_ROTACIONAIS_IGNORADOS_ANTES_DO_CORTE: {registros_rotacionais_ignorados}")
     print()
 
 
@@ -149,7 +164,9 @@ def main() -> None:
     funcao = args.funcao
     dia = args.grupo.upper()
 
-    guard = SpreadsheetGuard(load_settings())
+    settings = load_settings()
+    data_corte_historico = settings.data_corte_historico
+    guard = SpreadsheetGuard(settings)
     regras_raw = guard.read_worksheet(BP_ALGORITMO_TITLE)
     agenda_raw = guard.read_worksheet(AGENDA_TITLE)
     titulos = set(guard.list_worksheet_titles())
@@ -175,6 +192,14 @@ def main() -> None:
         grupo_regras.append(regra)
 
     nomes_validos = {r.nome.strip().upper(): r.nome for r in grupo_regras}
+    historico_ceia_ignorado_antes_corte = carregar_historico_ceia_persistido(
+        agenda_raw,
+        auditoria_raw,
+        dia_da_semana=dia,
+        coluna_alocacao=COLUNA_PADRAO,
+        nomes_validos=nomes_validos,
+        antes_de=data_corte_historico,
+    )
     historico_ceia_persistido = carregar_historico_ceia_persistido(
         agenda_raw,
         auditoria_raw,
@@ -182,6 +207,7 @@ def main() -> None:
         coluna_alocacao=COLUNA_PADRAO,
         nomes_validos=nomes_validos,
         antes_de=data_alvo,
+        data_corte_historico=data_corte_historico,
     )
     participantes_ceia = [r for r in grupo_regras if r.ceia_alternada]
     usados_ciclo_ceia = calcular_participantes_ciclo_ceia(
@@ -211,8 +237,9 @@ def main() -> None:
         raise SystemExit(f"Data {data_alvo.isoformat()} nao encontrada em {AGENDA_TITLE}.")
 
     alvo = [s for s in slots if s.data == data_alvo][0]
-    slots_anteriores = [s for s in slots if s.data < data_alvo]
-    meses = {s.mes_key for s in slots}
+    slots_rotacionais = [s for s in slots if s.data >= data_corte_historico]
+    slots_anteriores = [s for s in slots_rotacionais if s.data < data_alvo]
+    meses = {s.mes_key for s in slots_rotacionais}
     demanda = calcular_demanda_onda_expansiva(
         grupo_regras,
         vagas_reais_no_periodo=len(slots),
@@ -226,6 +253,7 @@ def main() -> None:
             dia,
             ("CEIA",),
             nomes_validos=nomes_validos,
+            data_corte_historico=data_corte_historico,
         ),
     )
     decisoes_por_row = {}
@@ -261,12 +289,46 @@ def main() -> None:
         meses_da_ronda=meses,
         hierarquia_cursor_regras=grupo_regras,
     )
+    if eh_slot_ceia(alvo):
+        estado_decisao = deepcopy(estado)
+        decisao_ceia = alocar_grupo(
+            grupo_regras,
+            [alvo],
+            estado_decisao,
+            demanda.mapa_limites_locais,
+            excluse_header=excluse_header,
+            excluse_rows=excluse_rows,
+            mapa_limites_mensais=demanda.mapa_limites_mensais,
+            aniversarios=carregar_aniversarios(bp_service_raw),
+            compromissos_cruzados=carregar_compromissos_cruzados(agenda_raw, COLUNA_PADRAO, dia),
+        )[0]
+        intent_ceia = AllocationIntent.CEIA if decisao_ceia.vencedor else AllocationIntent.NO_ALLOCATION
+        trace = replace(
+            trace,
+            intent=intent_ceia,
+            consome_hierarquia=decisao_ceia.consome_hierarquia,
+            cursor_depois=decisao_ceia.cursor_depois,
+            politica_selecao=politica_selecao_por_intencao(intent_ceia),
+            selecionado=decisao_ceia.vencedor,
+            motivo_escolha=decisao_ceia.motivo,
+            obrigacao_satisfeita=obrigacao_satisfeita_por_intencao(intent_ceia),
+            prioridade_selecionado=decisao_ceia.prioridade_vencedor,
+        )
 
     print("MODO: READ-ONLY (nenhuma escrita em Sheets)")
+    print(f"DATA_CORTE_HISTORICO: {data_corte_historico.isoformat()}")
+    print("Estado rotacional anterior a data de corte e legado; fatos reais de agenda continuam visiveis a filtros temporais.")
     print(f"VALOR_ATUAL_NA_AGENDA: {valor_atual_alvo or '(vazio)'}")
     print(f"SLOT_CEIA: {'SIM' if eh_slot_ceia(alvo) else 'NAO'}")
     print()
-    imprimir_ceia(historico_ceia_persistido, participantes_ceia, usados_ciclo_ceia, primeiro_candidato_ceia)
+    imprimir_ceia(
+        historico_ceia_persistido,
+        participantes_ceia,
+        usados_ciclo_ceia,
+        primeiro_candidato_ceia,
+        data_corte_historico,
+        len(historico_ceia_ignorado_antes_corte),
+    )
     imprimir_trace(trace, grupo_regras)
 
 

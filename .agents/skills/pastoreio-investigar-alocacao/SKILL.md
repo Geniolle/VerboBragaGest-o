@@ -40,6 +40,12 @@ avaliados, motivos de rejeição, quota mensal, CEIA no mês e vencedor. Use
 esse trace como evidência primária antes de levantar hipótese ou alterar
 regra.
 
+Para `D. MINISTROS / MINISTRO / DOMINGO`, o diagnóstico deve exibir
+`DATA_CORTE_HISTORICO`. O histórico rotacional antes desse corte é legado:
+não entra em cursor, CEIA, replay, lacuna, GAP_FILL/RESGATE ou quota do novo
+motor. Ainda assim, compromissos reais anteriores ao corte podem aparecer em
+filtros temporais, como descanso cruzado.
+
 ## Onde procurar evidência, por categoria
 
 Percorra estes pontos na ordem em que `motor.py` os aplica (etapa 1 =

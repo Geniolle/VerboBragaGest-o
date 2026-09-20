@@ -5,6 +5,8 @@ BP ALGORITIMO desaparecer do cabecalho (renomeada/deslocada sem atualizar o
 texto), `carregar_regras_colaboradores` deve falhar alto, nunca voltar a
 carregar tudo em silencio com prioridade=999 (ou outro default) para todo
 mundo."""
+from datetime import date
+
 import pytest
 
 from pastoreio_orquestrador.carregamento import (
@@ -104,3 +106,21 @@ def test_contar_ocorrencias_mensais_por_colaborador_lendo_ceia_e_ministro():
         "Pessoa A": {"2026-12": 2},
         "Pessoa B": {"2026-12": 1},
     }
+
+
+def test_contar_ocorrencias_mensais_respeita_data_corte_rotacional():
+    valores = [
+        ["DATA", "DIA DA SEMANA", "MINISTRO"],
+        ["27/09/2026", "DOMINGO", "Pessoa A"],
+        ["04/10/2026", "DOMINGO", "Pessoa A"],
+    ]
+
+    contagem = contar_ocorrencias_mensais_por_colaborador(
+        valores,
+        "DOMINGO",
+        ("MINISTRO",),
+        nomes_validos={"PESSOA A": "Pessoa A"},
+        data_corte_historico=date(2026, 10, 1),
+    )
+
+    assert contagem == {"Pessoa A": {"2026-10": 1}}

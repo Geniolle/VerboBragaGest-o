@@ -43,6 +43,13 @@ So escreve na coluna MINISTRO. Escreve exclusivamente na copia
 CLAUDE_AppAnualGlobal (guard bloqueia qualquer tentativa em aba sem o
 prefixo).
 
+Data de corte historica: este processo tambem respeita
+`PASTOREIO_DATA_CORTE_HISTORICO`, mas como fluxo proprio de QUARTA-FEIRA.
+Somente quartas-feiras em/apos essa data entram no estado rotacional,
+Rondas, replay, rodizio por nivel, historico por tema e quotas. Linhas
+anteriores continuam existindo na sheet e fatos reais anteriores ao corte
+continuam visiveis a filtros de proximidade, como descanso cruzado.
+
 Email automatico (pedido do Clayton, 2026-09-11): sempre que um nome e
 escrito na coluna MINISTRO, o email correspondente (aba "BP SERVICE",
 coluna EMAIL, casado por NOME) e escrito junto na coluna "EMAIL MINISTRO"
@@ -75,6 +82,7 @@ from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 DEPARTAMENTO, FUNCAO, DIA = "D. MINISTROS", "MINISTRO", "QUARTA-FEIRA"
 AGENDA_TITLE = "CLAUDE_AppAnualGlobal"
+BP_ALGORITMO_TITLE = "CLAUDE_BP ALGORITIMO"
 COL_NOME = "MINISTRO"
 
 
@@ -101,11 +109,35 @@ def montar_slot(row: list[str], idx: dict[str, int], row_i: int, d: date) -> Slo
     )
 
 
+def coletar_linhas_agenda_quarta(
+    agenda_raw: list[list[str]],
+    idx: dict[str, int],
+    data_corte_historico: date,
+) -> tuple[list[tuple[int, date, str]], int]:
+    """Coleta somente quartas que participam do estado rotacional novo."""
+    linhas_agenda: list[tuple[int, date, str]] = []
+    ignoradas_antes_do_corte = 0
+    for row_i, row in enumerate(agenda_raw[1:], start=1):
+        dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
+        if DIA not in dia:
+            continue
+        d = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
+        if d is None:
+            continue
+        if d < data_corte_historico:
+            ignoradas_antes_do_corte += 1
+            continue
+        linhas_agenda.append((row_i, d, get(row, idx, COL_NOME).strip()))
+    linhas_agenda.sort(key=lambda t: t[1])
+    return linhas_agenda, ignoradas_antes_do_corte
+
+
 def main() -> None:
     settings = load_settings()
+    data_corte_historico = settings.data_corte_historico
     guard = SpreadsheetGuard(settings)
 
-    regras_raw = guard.read_worksheet("CLAUDE_BP ALGORITIMO")
+    regras_raw = guard.read_worksheet(BP_ALGORITMO_TITLE)
     agenda_raw = guard.read_worksheet(AGENDA_TITLE)
     livros_raw = guard.read_worksheet("Livros")
     excluse_raw = guard.read_worksheet("Excluse")
@@ -137,26 +169,29 @@ def main() -> None:
                 continue
             nomes_vistos.add(r.nome)
             grupo.append(r)
+    if not grupo:
+        print(f"Nenhum colaborador ativo encontrado para {DEPARTAMENTO}/{FUNCAO}/{DIA}.")
+        return
 
     temas_livros = carregar_temas(livros_raw)
     bp_log = carregar_bp_log(bp_log_raw)
     zumbis = carregar_zumbis_prioritarios(bp_log, DEPARTAMENTO, FUNCAO)
 
-    # Todas as quartas-feiras do grupo na sheet (passado e futuro), com o
-    # valor MINISTRO atual -- preenchido (Ronda ja fechada) ou vazio.
-    linhas_agenda: list[tuple[int, date, str]] = []
-    for row_i, row in enumerate(agenda_raw[1:], start=1):
-        dia = get(row, idx, ColAppAnualGlobal.DIA_DA_SEMANA).strip().upper()
-        if DIA not in dia:
-            continue
-        d = parse_date_ddmmyyyy(get(row, idx, ColAppAnualGlobal.DATA).strip())
-        if d is None:
-            continue
-        linhas_agenda.append((row_i, d, get(row, idx, COL_NOME).strip()))
-    linhas_agenda.sort(key=lambda t: t[1])
+    # Somente quartas-feiras em/apos a data de corte entram no estado
+    # rotacional. A agenda completa continua carregada para fatos reais de
+    # proximidade, como descanso cruzado.
+    linhas_agenda, ignoradas_antes_do_corte = coletar_linhas_agenda_quarta(
+        agenda_raw,
+        idx,
+        data_corte_historico,
+    )
+    print(f"DATA CORTE DO HISTORICO: {data_corte_historico.strftime('%d/%m/%Y')}")
+    print("Estado rotacional anterior a data de corte sera ignorado para QUARTA-FEIRA.")
+    print(f"Quartas anteriores ao corte ignoradas no estado: {ignoradas_antes_do_corte}")
+    print("Compromissos reais anteriores ao corte continuam disponiveis para filtros de proximidade.\n")
 
     if not linhas_agenda:
-        print("Nenhuma quarta-feira encontrada na sheet. Fim.")
+        print("Nenhuma quarta-feira encontrada a partir da data de corte. Fim.")
         return
 
     valor_por_data = {d: m for _, d, m in linhas_agenda}
@@ -209,8 +244,10 @@ def main() -> None:
         fechada = all(valor_por_data[d] for d in bloco)
         if fechada:
             # Replay: reproduz a Ronda ja gravada so para alimentar o
-            # rodizio (historico_vencedores_ceia/lacuna, cotas, descanso
-            # minimo etc.) -- nao escreve nada de volta. NAO aplica o
+            # rodizio de nivel/tema, lacuna, cotas, descanso minimo etc.
+            # Como os blocos ja foram recortados pela data de corte, o
+            # replay nunca reconstrói estado legado anterior ao novo motor.
+            # Nao escreve nada de volta. NAO aplica o
             # descanso minimo cruzado aqui (2026-09-08, mesmo motivo do
             # irmao DOMINGO): `compromissos_cruzados` reflete o estado
             # ATUAL inteiro da sheet, entao usa-lo no replay quebraria a
@@ -243,6 +280,8 @@ def main() -> None:
     # celula.
     updates: list[tuple[int, int, str]] = []
     for d in decisoes:
+        if d.slot.data < data_corte_historico:
+            raise RuntimeError(f"Tentativa de escrever data anterior ao corte: {d.slot.data}")
         if valor_por_data[d.slot.data]:
             print(f"  {d.slot.data} -> ja preenchida na sheet, nao escrita (esperado apenas se a Ronda ja estava fechada)")
             continue
@@ -259,8 +298,13 @@ def main() -> None:
         email = emails.get(d.vencedor.strip().upper(), "")
         updates.append((linha_sheet, col_ministro + 1, d.vencedor))
         updates.append((linha_sheet, col_email + 1, email))
-        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet}) "
+        tema = d.slot.tema or "(TEMA VAZIO)"
+        print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) [TEMA={tema}] (linha {linha_sheet}) "
               f"[EMAIL MINISTRO={email or '(sem email cadastrado)'}]")
+
+    if not updates:
+        print("\nNenhuma celula nova para escrever.")
+        return
 
     guard.batch_update_cells(AGENDA_TITLE, updates)
 

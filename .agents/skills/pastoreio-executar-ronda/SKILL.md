@@ -83,7 +83,11 @@ DOMINGO e QUARTA-FEIRA devem continuar como processos separados. Não
 transporte estado de CEIA, cursor normal de DOMINGO, intenção `CEIA`, nem
 replay/histórico de DOMINGO para o fluxo de QUARTA-FEIRA. QUARTA-FEIRA tem
 tema/nível/rodízio próprios e qualquer reconstrução histórica desse fluxo
-precisa ser desenhada e testada separadamente.
+precisa ser desenhada e testada separadamente. A data de corte histórica
+também é aplicada ao processo de QUARTA-FEIRA, mas apenas ao estado
+rotacional próprio desse fluxo (Rondas, replay, quotas, rodízio por
+nível/tema); fatos reais anteriores ao corte continuam visíveis para filtros
+como descanso cruzado.
 
 `scripts/cockpit_preencher_claude.py` executa todos em sequência (aceita
 `--simular` para só mostrar a ordem, e `--continuar-em-erro`).

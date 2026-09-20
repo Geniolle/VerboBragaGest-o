@@ -36,14 +36,15 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   passadas quando o dado real existe. Em particular, a sequência histórica da
   CEIA de DOMINGO vem dos vencedores persistidos confirmados por auditoria,
   não de replay do motor atual sobre Rondas antigas.
-- Para `D. MINISTROS / MINISTRO / DOMINGO`, `PASTOREIO_DATA_CORTE_HISTORICO`
+- Para `D. MINISTROS / MINISTRO / DOMINGO` e
+  `D. MINISTROS / MINISTRO / QUARTA-FEIRA`, `PASTOREIO_DATA_CORTE_HISTORICO`
   define o marco inicial do novo motor. O valor oficial atual é
   `2026-10-01`: estado rotacional anterior a essa data é legado e não entra
-  na reconstrução de cursor, CEIA, replay de Rondas, cotas, lacunas,
-  GAP_FILL/RESGATE ou qualquer histórico persistente do algoritmo. Isso não
-  apaga nem altera dados antigos, e não filtra fatos reais necessários a
-  bloqueios temporais, como descanso cruzado, Excluse, aniversário ou
-  indisponibilidades.
+  na reconstrução de cursor/ciclo, CEIA, replay de Rondas, cotas, lacunas,
+  GAP_FILL/RESGATE, rodízio de nível/tema da quarta ou qualquer histórico
+  persistente do algoritmo. Isso não apaga nem altera dados antigos, e não
+  filtra fatos reais necessários a bloqueios temporais, como descanso
+  cruzado, Excluse, aniversário ou indisponibilidades.
 - Em DOMINGO, CEIA e MINISTRO compartilham a contagem de participação mensal
   para `REPETIÇÃO MENSAL`: uma CEIA já conta como uma ocorrência do mês.
   Isso não altera a regra anterior de cursor: CEIA continua com ciclo próprio
@@ -74,8 +75,8 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   Mantenha os processos separados: mudanças no histórico/ciclo de CEIA,
   cursor de DOMINGO ou replay de Rondas de DOMINGO não podem ser reaproveitadas
   implicitamente em QUARTA-FEIRA. QUARTA-FEIRA usa seus próprios conceitos de
-  tema, nível e rodízio; se precisar de reconstrução histórica ali, trate como
-  fluxo próprio, com testes próprios.
+  tema, nível e rodízio; a data de corte também existe ali, mas aplicada por
+  fluxo próprio e sem importar CEIA/cursor normal de DOMINGO.
 - `GRUPOS_VALIDADOS.md` é o registo oficial de quais combinações
   `DEPARTAMENTO###FUNÇÃO###DIA DA SEMANA` já tiveram pelo menos um teste de
   integração real revisado por humano.

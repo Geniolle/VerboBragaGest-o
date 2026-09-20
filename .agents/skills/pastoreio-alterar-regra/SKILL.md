@@ -110,8 +110,9 @@ campo errado, "reorganização de lacuna" inicialmente permitindo puxar um
 outsider). Depois de os testes unitários passarem, quando a mudança afeta
 um grupo já validado (ver `GRUPOS_VALIDADOS.md`), prefira reexecutar (ou
 simular) o cálculo contra uma cópia `CLAUDE_*` real e comparar o resultado
-com o esperado antes de dar a mudança como concluída — sempre por escrita
-via `SpreadsheetGuard`, nunca na aba original.
+com o esperado antes de dar a mudança como concluída. Escrita produtiva só
+pode ocorrer quando aquele processo específico já foi promovido pelo
+utilizador e o script declara a allowlist produtiva no `SpreadsheetGuard`.
 
 ## Se a mudança for descrita em prosa por alguém, não em código
 

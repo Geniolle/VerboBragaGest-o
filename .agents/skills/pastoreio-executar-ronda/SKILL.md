@@ -33,8 +33,9 @@ motor.py (alocar_grupo / _alocar_grupo_domingo_ceia_alternada)
    ↓
 decisões (DecisaoAlocacao por slot)
    ↓ script preencher_claude_appanualglobal_<grupo>.py
-CLAUDE_AppAnualGlobal (escrita via SpreadsheetGuard)
-   ↓ auditoria.py -> CLAUDE_LOG_AUDITORIA
+AppAnualGlobal ou CLAUDE_AppAnualGlobal (sempre via SpreadsheetGuard;
+produtivo só para processo explicitamente promovido)
+   ↓ auditoria.py -> CLAUDE_LOG_AUDITORIA ou LOG_AUDITORIA
 auditoria
    ↓
 validação (revisão humana do resultado escrito)
@@ -145,13 +146,21 @@ Cada script de preenchimento, na prática:
 6. Escreve `"SEM ALOCAÇÃO"` (texto literal) quando genuinamente não há
    candidato possível — nunca deixa a célula em branco por omissão.
 
-## 4. Escrita — sempre via SpreadsheetGuard, sempre em CLAUDE_*
+## 4. Escrita — sempre via SpreadsheetGuard
 
 Nenhum script novo deve chamar métodos de escrita diretamente num objeto
 `gspread.Worksheet` — use sempre `guard.update_cell` / `guard.append_row` /
-`guard.batch_update_cells`. Ver a secção "Regra de segurança máxima" em
-`../../../AGENTS.md` (inclui a dívida técnica conhecida em
-`testar_ministros_quarta.py`, a não repetir).
+`guard.batch_update_cells`. Por padrão, escreva em `CLAUDE_*`. Quando o
+utilizador promover um processo para produtivo, declare a allowlist de abas
+produtivas no `SpreadsheetGuard` daquele script e documente essa promoção no
+próprio processo; não promova outros dias/grupos por arrasto. Ver a secção
+"Regra de segurança máxima" em `../../../AGENTS.md`.
+
+Estado atual: o processo `D. MINISTROS / MINISTRO / DOMINGO` está habilitado
+para produtivo quando executado com `--produtivo` (`AppAnualGlobal` +
+`LOG_AUDITORIA`). Sem essa flag, continua em `CLAUDE_*`. QUARTA-FEIRA, CEIA,
+auxiliares, sincronização e limpezas continuam processos separados e não
+herdam essa autorização.
 
 ## 5. Auditoria
 
@@ -159,9 +168,10 @@ Nenhum script novo deve chamar métodos de escrita diretamente num objeto
 linha de log (RUN_ID, motivo, intenção, obrigação satisfeita, prioridade,
 `CONSOME_HIERARQUIA`, runner-up, ordem completa de desempate), gravada de
 forma cumulativa (nunca apaga execuções anteriores) em
-`CLAUDE_LOG_AUDITORIA` via `guard.ensure_worksheet_with_header` +
-`guard.append_rows`. Os scripts de preenchimento já fazem isto — não
-suprima essa etapa ao criar/adaptar um script novo.
+`CLAUDE_LOG_AUDITORIA` ou `LOG_AUDITORIA` via
+`guard.ensure_worksheet_with_header` + `guard.append_rows`, conforme o modo
+do processo. Os scripts de preenchimento já fazem isto — não suprima essa
+etapa ao criar/adaptar um script novo.
 
 ## 6. Validação humana
 

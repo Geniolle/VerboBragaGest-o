@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Preenche a coluna MINISTRO da CLAUDE_AppAnualGlobal (D. MINISTROS / MINISTRO
+"""Preenche a coluna MINISTRO da AppAnualGlobal/CLAUDE_AppAnualGlobal (D. MINISTROS / MINISTRO
 / DOMINGO) com EXATAMENTE UMA Ronda (ciclo completo) por execucao -- nunca
 mais de uma. Respeita qualquer alocacao ja existente na coluna MINISTRO (nao
 sobrescreve) e comeca a proxima Ronda a partir do primeiro domingo futuro
@@ -19,8 +19,11 @@ So escreve na coluna MINISTRO -- a coluna CEIA pertence a outro grupo
 (FUNCAO="CEIA" em BP ALGORITIMO, ainda nao processado nesta sessao) e fica
 intocada de proposito.
 
-Escreve exclusivamente na copia CLAUDE_AppAnualGlobal (guard bloqueia
-qualquer tentativa em aba sem o prefixo).
+Por padrao escreve na copia `CLAUDE_AppAnualGlobal`. Como DOMINGO ja foi
+validado para produtivo, este mesmo script aceita `--produtivo`; nesse modo,
+escreve em `AppAnualGlobal` e `LOG_AUDITORIA` por allowlist explicita no
+SpreadsheetGuard. Os demais processos continuam bloqueados para escrita
+produtiva ate serem promovidos separadamente.
 
 Correcao 2026-09-07 (pedido do Clayton, caso real: Patricia Lopes nasceu em
 25/10 e havia sido alocada em 25/10/2026): le tambem a aba "BP SERVICE"
@@ -46,11 +49,11 @@ email em branco, sem erro.
 """
 from __future__ import annotations
 
+import argparse
 from datetime import date
 
 from pastoreio_orquestrador.auditoria import (
     CABECALHO_AUDITORIA,
-    NOME_ABA_AUDITORIA,
     construir_linhas_auditoria,
     resolver_ultimo_cursor_hierarquia,
 )
@@ -74,8 +77,15 @@ from pastoreio_orquestrador.parsing_utils import (
 from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 DEPARTAMENTO, FUNCAO, DIA = "D. MINISTROS", "MINISTRO", "DOMINGO"
-AGENDA_TITLE = "AppAnualGlobal"
 COL_NOME = "MINISTRO"
+
+AGENDA_CLAUDE_TITLE = "CLAUDE_AppAnualGlobal"
+BP_ALGORITMO_CLAUDE_TITLE = "CLAUDE_BP ALGORITIMO"
+AUDITORIA_CLAUDE_TITLE = "CLAUDE_LOG_AUDITORIA"
+
+AGENDA_PROD_TITLE = "AppAnualGlobal"
+BP_ALGORITMO_PROD_TITLE = "BP ALGORITIMO"
+AUDITORIA_PROD_TITLE = "LOG_AUDITORIA"
 
 
 def montar_slot(row: list[str], idx: dict[str, int], row_i: int, d: date) -> SlotAgenda:
@@ -95,13 +105,34 @@ def montar_slot(row: list[str], idx: dict[str, int], row_i: int, d: date) -> Slo
 
 
 def main() -> None:
-    settings = load_settings()
-    guard = SpreadsheetGuard(settings)
+    parser = argparse.ArgumentParser(description="Preenche uma Ronda de DOMINGO.")
+    parser.add_argument(
+        "--produtivo",
+        action="store_true",
+        help="Escreve em AppAnualGlobal/LOG_AUDITORIA. Sem esta flag, usa CLAUDE_*.",
+    )
+    args = parser.parse_args()
 
-    regras_raw = guard.read_worksheet("CLAUDE_BP ALGORITIMO")
-    agenda_raw = guard.read_worksheet(AGENDA_TITLE)
+    agenda_title = AGENDA_PROD_TITLE if args.produtivo else AGENDA_CLAUDE_TITLE
+    bp_algoritmo_title = BP_ALGORITMO_PROD_TITLE if args.produtivo else BP_ALGORITMO_CLAUDE_TITLE
+    auditoria_title = AUDITORIA_PROD_TITLE if args.produtivo else AUDITORIA_CLAUDE_TITLE
+    writable_original_titles = {agenda_title, auditoria_title} if args.produtivo else set()
+
+    settings = load_settings()
+    guard = SpreadsheetGuard(
+        settings,
+        writable_original_titles=writable_original_titles,
+    )
+
+    modo = "PRODUTIVO" if args.produtivo else "CLAUDE"
+    print(f"Modo de escrita: {modo}")
+    print(f"Agenda: {agenda_title}")
+    print(f"Auditoria: {auditoria_title}\n")
+
+    regras_raw = guard.read_worksheet(bp_algoritmo_title)
+    agenda_raw = guard.read_worksheet(agenda_title)
     titulos = set(guard.list_worksheet_titles())
-    auditoria_raw = guard.read_worksheet(NOME_ABA_AUDITORIA) if NOME_ABA_AUDITORIA in titulos else []
+    auditoria_raw = guard.read_worksheet(auditoria_title) if auditoria_title in titulos else []
     excluse_raw = guard.read_worksheet("Excluse")
     excluse_header, excluse_rows = carregar_excluse_matriz(excluse_raw)
     bp_log_raw = guard.read_worksheet("BP LOG")
@@ -315,7 +346,7 @@ def main() -> None:
           f"({resultado_ronda.slots[0].data} a {resultado_ronda.slots[-1].data})\n")
 
     print(f"Escrevendo {DEPARTAMENTO}/{FUNCAO}/{DIA} na coluna "
-          f"MINISTRO (col {col_ministro + 1}) de {AGENDA_TITLE}...\n")
+          f"MINISTRO (col {col_ministro + 1}) de {agenda_title}...\n")
 
     # Acumula todas as celulas da Ronda e escreve numa UNICA chamada de API
     # (2026-09-08, pedido do Clayton para economizar cota depois de bater em
@@ -342,7 +373,7 @@ def main() -> None:
         print(f"  {d.slot.data} -> {d.vencedor} ({d.motivo}) (linha {linha_sheet}) "
               f"[EMAIL MINISTRO={email or '(sem email cadastrado)'}]")
 
-    guard.batch_update_cells(AGENDA_TITLE, updates)
+    guard.batch_update_cells(agenda_title, updates)
     linhas_auditoria = construir_linhas_auditoria(
         decisoes,
         grupo_label=f"{DEPARTAMENTO}/{FUNCAO}/{DIA}",
@@ -352,12 +383,12 @@ def main() -> None:
         regras_por_nome=regras_por_nome,
     )
     if linhas_auditoria:
-        guard.ensure_worksheet_with_header(NOME_ABA_AUDITORIA, CABECALHO_AUDITORIA, rows=1000)
-        guard.append_rows(NOME_ABA_AUDITORIA, linhas_auditoria)
+        guard.ensure_worksheet_with_header(auditoria_title, CABECALHO_AUDITORIA, rows=1000)
+        guard.append_rows(auditoria_title, linhas_auditoria)
 
     print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API). Colunas MINISTRO"
           " e EMAIL MINISTRO foram escritas -- CEIA nao foi tocada (pertence a outro grupo/FUNCAO).")
-    print(f"{len(linhas_auditoria)} linha(s) adicionada(s) em {NOME_ABA_AUDITORIA}.")
+    print(f"{len(linhas_auditoria)} linha(s) adicionada(s) em {auditoria_title}.")
 
 
 if __name__ == "__main__":

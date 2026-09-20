@@ -74,21 +74,29 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
 
 ## Regra de segurança máxima (inegociável)
 
-**As abas originais da spreadsheet são somente leitura.** Nunca escrever,
-limpar, apagar ou sobrescrever uma aba original. Qualquer escrita de
-desenvolvimento/teste ocorre exclusivamente em abas com prefixo `CLAUDE_`
-(ex.: `CLAUDE_AppAnualGlobal`, `CLAUDE_BP ALGORITIMO`).
+**Escrita em Google Sheets é sempre controlada por processo.** Por padrão,
+abas originais são somente leitura e qualquer escrita de desenvolvimento/teste
+ocorre exclusivamente em abas com prefixo `CLAUDE_` (ex.:
+`CLAUDE_AppAnualGlobal`, `CLAUDE_BP ALGORITIMO`).
 
-Toda nova escrita **deve** passar por `sheets_client.SpreadsheetGuard`
+Um processo validado pode ser promovido para escrita produtiva quando o
+utilizador decidir. Nesse caso, o código deve declarar explicitamente a
+allowlist de abas produtivas autorizadas ao instanciar
+`sheets_client.SpreadsheetGuard`, por exemplo
+`SpreadsheetGuard(settings, writable_original_titles={"AppAnualGlobal"})`.
+Nunca faça escrita produtiva por nome implícito, prefixo genérico ou variável
+global escondida. Cada processo (DOMINGO, QUARTA-FEIRA, CEIA, sincronização,
+etc.) deve ser promovido separadamente.
+
+Toda escrita **deve** passar por `sheets_client.SpreadsheetGuard`
 (`update_worksheet`, `update_cell`, `batch_update_cells`, `append_row`,
 `append_rows`, `create_worksheet`, `ensure_worksheet_with_header`,
-`delete_worksheet`) — cada um desses métodos valida o prefixo `CLAUDE_` e
-levanta `TentativaDeAlteracaoOriginalError` caso contrário. Código novo
-**não deve** chamar métodos de escrita/delete diretamente num objeto
-`gspread.Worksheet` (`ws.update_cell(...)`, `ws.update(...)`,
-`ws.append_row(...)`, `spreadsheet.del_worksheet(...)`, etc.) — isso
-contorna a trava do Guard mesmo que, no caso concreto, o `Worksheet` em
-questão já seja uma cópia `CLAUDE_`.
+`delete_worksheet`). O Guard permite `CLAUDE_*` por padrão, permite abas
+produtivas somente na allowlist explícita do processo, e nunca permite apagar
+aba produtiva. Código novo **não deve** chamar métodos de escrita/delete
+diretamente num objeto `gspread.Worksheet` (`ws.update_cell(...)`,
+`ws.update(...)`, `ws.append_row(...)`, `spreadsheet.del_worksheet(...)`,
+etc.) — isso contorna a trava do Guard.
 
 Todos os scripts de produção atuais (`preencher_claude_appanualglobal_*.py`,
 `limpar_*.py`) e scripts de teste tocados recentemente devem usar o Guard
@@ -101,8 +109,14 @@ Escrita permitida/proibida, resumido:
 |---|---|---|
 | Ler | Permitido | Permitido |
 | Duplicar (`duplicate_sheet_for_testing`) | Permitido (fonte) | — |
-| Escrever/atualizar | **Proibido** | Permitido, via Guard |
+| Escrever/atualizar | Permitido só com allowlist explícita do processo | Permitido, via Guard |
 | Apagar | **Proibido** | Permitido, via Guard, quando o workflow justificar |
+
+Neste momento, `scripts/preencher_claude_appanualglobal_domingo.py` está
+habilitado para produtivo quando executado com `--produtivo`; nesse modo ele
+pode escrever em `AppAnualGlobal` e `LOG_AUDITORIA` via allowlist explícita.
+Sem essa flag, continua usando `CLAUDE_*`. Isso não promove automaticamente
+QUARTA-FEIRA, CEIA, auxiliares, sincronização de BP ou scripts de limpeza.
 
 ## Testes
 

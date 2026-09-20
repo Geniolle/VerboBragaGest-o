@@ -56,6 +56,11 @@ fonte de verdade.
    rodízios de tema/nível próprios da quarta. Não aplique esse corte a fatos
    reais de agenda usados por filtros temporais, como descanso cruzado,
    Excluse, aniversário ou indisponibilidades.
+   Em QUARTA-FEIRA, `TIPO ALOCAÇÃO` define a natureza da regra. Não use
+   `PRIORIDADE` para representar reserva fixa: regras `FIXO_RECORRENTE`
+   devem ser modeladas como reserva anterior ao rodízio normal, com política
+   pura de recorrência em `domain/quarta/`, removidas do pool normal quando
+   não aplicam e sem consumir rodízio por nível/tema.
    Ao tocar reconstrução entre execuções, não recalcule decisões passadas
    quando o resultado real já existe: a CEIA histórica de DOMINGO deve ser
    carregada da agenda persistida confirmada por auditoria/intenção `CEIA`,

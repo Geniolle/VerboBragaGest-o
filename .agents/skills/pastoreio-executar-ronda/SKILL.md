@@ -89,6 +89,14 @@ rotacional próprio desse fluxo (Rondas, replay, quotas, rodízio por
 nível/tema); fatos reais anteriores ao corte continuam visíveis para filtros
 como descanso cruzado.
 
+Em QUARTA-FEIRA, avalie reservas `TIPO ALOCAÇÃO = FIXO_RECORRENTE` antes do
+rodízio normal. `TIPO ALOCAÇÃO` define a natureza da regra; `PRIORIDADE` não
+deve representar reserva fixa. Uma regra fixa só ocupa a data quando sua
+âncora + intervalo de meses + semana fixa aplicam; nas demais quartas, ela
+fica fora do pool normal. Reservas fixas não consomem rodízio por nível/tema
+nem contam como participação-base de colaborador normal. Ver
+`CONCEITO_QUARTA_FEIRA.md`.
+
 `scripts/cockpit_preencher_claude.py` executa todos em sequência (aceita
 `--simular` para só mostrar a ordem, e `--continuar-em-erro`).
 
@@ -168,9 +176,10 @@ próprio processo; não promova outros dias/grupos por arrasto. Ver a secção
 
 Estado atual: o processo `D. MINISTROS / MINISTRO / DOMINGO` está habilitado
 para produtivo quando executado com `--produtivo` (`AppAnualGlobal` +
-`LOG_AUDITORIA`). Sem essa flag, continua em `CLAUDE_*`. QUARTA-FEIRA, CEIA,
-auxiliares, sincronização e limpezas continuam processos separados e não
-herdam essa autorização.
+`LOG_AUDITORIA`). O processo `D. MINISTROS / MINISTRO / QUARTA-FEIRA` também
+está habilitado para produtivo com `--produtivo` (`AppAnualGlobal`). Sem essa
+flag, ambos continuam em `CLAUDE_*`. CEIA, auxiliares, sincronização e
+limpezas continuam processos separados e não herdam essa autorização.
 
 ## 5. Auditoria
 

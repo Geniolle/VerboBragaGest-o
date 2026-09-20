@@ -30,6 +30,9 @@ class RegraColaborador:
     temas: list[str]
     ativo: bool
     row_index_bp: int
+    tipo_alocacao: str | None = None
+    intervalo_meses: int | None = None
+    data_inicio_recorrencia: date | None = None
 
     @property
     def chave_grupo(self) -> str:

@@ -82,6 +82,48 @@ def validar_cabecalho_bp_algoritimo(idx: dict[str, int]) -> list[str]:
     return [nome for nome in COLUNAS_OBRIGATORIAS_BP_ALGORITIMO if nome not in idx]
 
 
+def _normalizar_tipo_alocacao(valor: str) -> str | None:
+    valor = valor.strip().upper()
+    return valor or None
+
+
+def _carregar_config_recorrencia_fixa(
+    row: list[str],
+    idx: dict[str, int],
+    *,
+    nome: str,
+    semana_preferencial: int,
+) -> tuple[str | None, int | None, date | None]:
+    tipo_alocacao = _normalizar_tipo_alocacao(get(row, idx, ColBpAlgoritimo.TIPO_ALOCACAO))
+    if tipo_alocacao != "FIXO_RECORRENTE":
+        return tipo_alocacao, None, None
+
+    intervalo_raw = get(row, idx, ColBpAlgoritimo.INTERVALO_MESES).strip()
+    if not intervalo_raw:
+        raise ValueError(f"{nome}: FIXO_RECORRENTE exige INTERVALO MESES.")
+    try:
+        intervalo_meses = int(intervalo_raw)
+    except ValueError as exc:
+        raise ValueError(f"{nome}: INTERVALO MESES invalido para FIXO_RECORRENTE: {intervalo_raw!r}.") from exc
+    if intervalo_meses <= 0:
+        raise ValueError(f"{nome}: INTERVALO MESES deve ser positivo para FIXO_RECORRENTE.")
+
+    data_raw = get(row, idx, ColBpAlgoritimo.DATA_INICIO_RECORRENCIA).strip()
+    if not data_raw:
+        raise ValueError(f"{nome}: FIXO_RECORRENTE exige DATA INÍCIO RECORRÊNCIA.")
+    partes_data = data_raw.split("/")
+    if len(partes_data) != 3 or [len(parte) for parte in partes_data] != [2, 2, 4]:
+        raise ValueError(f"{nome}: DATA INÍCIO RECORRÊNCIA invalida para FIXO_RECORRENTE: {data_raw!r}.")
+    data_inicio = parse_date_ddmmyyyy(data_raw)
+    if data_inicio is None:
+        raise ValueError(f"{nome}: DATA INÍCIO RECORRÊNCIA invalida para FIXO_RECORRENTE: {data_raw!r}.")
+
+    if semana_preferencial < 1 or semana_preferencial > 5:
+        raise ValueError(f"{nome}: FIXO_RECORRENTE exige SEMANA PREFERENCIAL entre 1 e 5.")
+
+    return tipo_alocacao, intervalo_meses, data_inicio
+
+
 def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColaborador]:
     """Le BP ALGORITIMO e devolve apenas as regras com ATIVO=true."""
     if not valores:
@@ -112,6 +154,13 @@ def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColabor
         temas = [t.strip() for t in temas_raw.split(";") if t.strip()] if temas_raw else []
 
         sinc = get(row, idx, ColBpAlgoritimo.SINC_COLABORADOR).strip()
+        semana_preferencial = parse_int(get(row, idx, ColBpAlgoritimo.SEMANA_PREFERENCIAL), default=0)
+        tipo_alocacao, intervalo_meses, data_inicio_recorrencia = _carregar_config_recorrencia_fixa(
+            row,
+            idx,
+            nome=nome,
+            semana_preferencial=semana_preferencial,
+        )
 
         regras.append(
             RegraColaborador(
@@ -123,7 +172,7 @@ def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColabor
                 prioridade=parse_int(get(row, idx, ColBpAlgoritimo.PRIORIDADE), default=999),
                 repeticao_mensal=parse_int(get(row, idx, ColBpAlgoritimo.REPETICAO_MENSAL), default=1),
                 alocar_todos_os_meses=parse_bool(get(row, idx, ColBpAlgoritimo.ALOCAR_TODOS_OS_MESES)),
-                semana_preferencial=parse_int(get(row, idx, ColBpAlgoritimo.SEMANA_PREFERENCIAL), default=0),
+                semana_preferencial=semana_preferencial,
                 ceia_alternada=parse_bool(get(row, idx, ColBpAlgoritimo.CEIA_ALTERNADA)),
                 semana_alternada=parse_bool(get(row, idx, ColBpAlgoritimo.SEMANA_ALTERNADA)),
                 alocacao_extra=parse_int(get(row, idx, ColBpAlgoritimo.ALOCACAO_EXTRA), default=0),
@@ -134,6 +183,9 @@ def carregar_regras_colaboradores(valores: list[list[str]]) -> list[RegraColabor
                 temas=temas,
                 ativo=True,
                 row_index_bp=row_i,
+                tipo_alocacao=tipo_alocacao,
+                intervalo_meses=intervalo_meses,
+                data_inicio_recorrencia=data_inicio_recorrencia,
             )
         )
     return regras

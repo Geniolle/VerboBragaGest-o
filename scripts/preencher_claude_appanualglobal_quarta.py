@@ -59,6 +59,7 @@ email em branco, sem erro.
 """
 from __future__ import annotations
 
+import argparse
 from datetime import date
 
 from pastoreio_orquestrador.carregamento import (
@@ -70,10 +71,16 @@ from pastoreio_orquestrador.carregamento import (
 )
 from pastoreio_orquestrador.columns import ColAppAnualGlobal
 from pastoreio_orquestrador.config import load_settings
-from pastoreio_orquestrador.models import SlotAgenda
+from pastoreio_orquestrador.domain.quarta.recorrencia import (
+    delimitar_ronda_quarta_com_fixos,
+    montar_decisao_fixa,
+    reserva_fixa_para_data,
+    separar_regras_quarta,
+)
+from pastoreio_orquestrador.models import DecisaoAlocacao, SlotAgenda
 from pastoreio_orquestrador.motor import (
     EstadoExecucaoGrupo, alocar_grupo, calcular_demanda_onda_expansiva,
-    delimitar_uma_ronda, filtrar_slots_ja_preenchidos, montar_requisito_tema_por_slot,
+    filtrar_slots_ja_preenchidos, montar_requisito_tema_por_slot,
 )
 from pastoreio_orquestrador.parsing_utils import (
     is_last_occurrence_of_month, month_key, parse_date_ddmmyyyy, week_of_month,
@@ -81,8 +88,10 @@ from pastoreio_orquestrador.parsing_utils import (
 from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 DEPARTAMENTO, FUNCAO, DIA = "D. MINISTROS", "MINISTRO", "QUARTA-FEIRA"
-AGENDA_TITLE = "CLAUDE_AppAnualGlobal"
-BP_ALGORITMO_TITLE = "CLAUDE_BP ALGORITIMO"
+AGENDA_CLAUDE_TITLE = "CLAUDE_AppAnualGlobal"
+AGENDA_PROD_TITLE = "AppAnualGlobal"
+BP_ALGORITMO_CLAUDE_TITLE = "CLAUDE_BP ALGORITIMO"
+BP_ALGORITMO_PROD_TITLE = "BP ALGORITIMO"
 COL_NOME = "MINISTRO"
 
 
@@ -133,12 +142,29 @@ def coletar_linhas_agenda_quarta(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Preenche uma Ronda de QUARTA-FEIRA.")
+    parser.add_argument(
+        "--produtivo",
+        action="store_true",
+        help="Escreve em AppAnualGlobal. Sem esta flag, usa CLAUDE_AppAnualGlobal.",
+    )
+    args = parser.parse_args()
+
+    agenda_title = AGENDA_PROD_TITLE if args.produtivo else AGENDA_CLAUDE_TITLE
+    bp_algoritmo_title = BP_ALGORITMO_PROD_TITLE if args.produtivo else BP_ALGORITMO_CLAUDE_TITLE
+    writable_original_titles = {agenda_title} if args.produtivo else set()
+
     settings = load_settings()
     data_corte_historico = settings.data_corte_historico
-    guard = SpreadsheetGuard(settings)
+    guard = SpreadsheetGuard(settings, writable_original_titles=writable_original_titles)
 
-    regras_raw = guard.read_worksheet(BP_ALGORITMO_TITLE)
-    agenda_raw = guard.read_worksheet(AGENDA_TITLE)
+    modo = "PRODUTIVO" if args.produtivo else "CLAUDE"
+    print(f"Modo de escrita: {modo}")
+    print(f"Agenda: {agenda_title}")
+    print(f"BP ALGORITIMO: {bp_algoritmo_title}\n")
+
+    regras_raw = guard.read_worksheet(bp_algoritmo_title)
+    agenda_raw = guard.read_worksheet(agenda_title)
     livros_raw = guard.read_worksheet("Livros")
     excluse_raw = guard.read_worksheet("Excluse")
     excluse_header, excluse_rows = carregar_excluse_matriz(excluse_raw)
@@ -172,6 +198,10 @@ def main() -> None:
     if not grupo:
         print(f"Nenhum colaborador ativo encontrado para {DEPARTAMENTO}/{FUNCAO}/{DIA}.")
         return
+    grupo_normal, regras_fixas = separar_regras_quarta(grupo)
+    if not grupo_normal:
+        print(f"Nenhum colaborador normal encontrado para {DEPARTAMENTO}/{FUNCAO}/{DIA}.")
+        return
 
     temas_livros = carregar_temas(livros_raw)
     bp_log = carregar_bp_log(bp_log_raw)
@@ -196,15 +226,21 @@ def main() -> None:
 
     valor_por_data = {d: m for _, d, m in linhas_agenda}
     row_por_data = {d: row_i for row_i, d, _ in linhas_agenda}
-    n_ativos = len(grupo)
+    n_ativos = len(grupo_normal)
 
     # Recorta a sequencia inteira de Rondas (blocos de n_ativos quartas,
     # estendidos ate fechar o mes) na ordem em que foram/serao preenchidas.
+    # Reservas FIXO_RECORRENTE entram no calendario da Ronda, mas nao contam
+    # como participacao-base de um colaborador normal.
     todas_as_datas = [d for _, d, _ in linhas_agenda]
     restantes = todas_as_datas[:]
     blocos: list[list[date]] = []
     while restantes:
-        bloco = delimitar_uma_ronda(restantes, n_colaboradores_ativos=n_ativos)
+        bloco = delimitar_ronda_quarta_com_fixos(
+            restantes,
+            n_colaboradores_normais=n_ativos,
+            regras_fixas=regras_fixas,
+        )
         if not bloco:
             break
         blocos.append(bloco)
@@ -220,24 +256,49 @@ def main() -> None:
             for d in datas
         ]
         if ronda_aberta:
+            for slot in slots:
+                regra_fixa = reserva_fixa_para_data(regras_fixas, slot.data)
+                valor_atual = valor_por_data.get(slot.data, "").strip()
+                if regra_fixa is not None and valor_atual and valor_atual.upper() != regra_fixa.nome.upper():
+                    print(
+                        "CONFLITO FIXO_RECORRENTE: "
+                        f"{slot.data} esperava {regra_fixa.nome}, "
+                        f"mas a agenda contem {valor_atual}. "
+                        "ACAO: nenhuma escrita nessa data."
+                    )
+        if ronda_aberta:
             # Regra global (ver motor.filtrar_slots_ja_preenchidos): datas ja
             # preenchidas dentro da Ronda aberta (ex.: feriado marcado a
             # mao) nao contam como vaga real -- nunca aplicar no replay de
             # uma Ronda fechada.
             slots = filtrar_slots_ja_preenchidos(slots, valor_por_data)
-        requisitos_tema = montar_requisito_tema_por_slot(slots, temas_livros)
-        meses_tocados = len({s.mes_key for s in slots})
+
+        decisoes_fixas: list[DecisaoAlocacao] = []
+        slots_normais: list[SlotAgenda] = []
+        for slot in slots:
+            regra_fixa = reserva_fixa_para_data(regras_fixas, slot.data)
+            if regra_fixa is None:
+                slots_normais.append(slot)
+            else:
+                decisoes_fixas.append(montar_decisao_fixa(slot, regra_fixa))
+
+        if not slots_normais:
+            return sorted(decisoes_fixas, key=lambda d: d.slot.data)
+
+        requisitos_tema = montar_requisito_tema_por_slot(slots_normais, temas_livros)
+        meses_tocados = len({s.mes_key for s in slots_normais})
         demanda = calcular_demanda_onda_expansiva(
-            grupo, vagas_reais_no_periodo=len(slots), meses_tocados=meses_tocados
+            grupo_normal, vagas_reais_no_periodo=len(slots_normais), meses_tocados=meses_tocados
         )
-        return alocar_grupo(
-            grupo, slots, estado, demanda.mapa_limites_locais,
+        decisoes_normais = alocar_grupo(
+            grupo_normal, slots_normais, estado, demanda.mapa_limites_locais,
             requisitos_tema_por_slot=requisitos_tema,
             excluse_header=excluse_header, excluse_rows=excluse_rows,
             mapa_limites_mensais=demanda.mapa_limites_mensais,
             compromissos_cruzados=compromissos_cruzados if aplicar_cruzados else None,
             aniversarios=aniversarios,
         )
+        return sorted(decisoes_fixas + decisoes_normais, key=lambda d: d.slot.data)
 
     ronda_para_escrever: list[date] | None = None
     for bloco in blocos:
@@ -265,14 +326,15 @@ def main() -> None:
         print("Nenhuma Ronda com quartas vazias encontrada (tudo ja preenchido ate onde ha dados). Fim.")
         return
 
-    print(f"N (colaboradores ativos no grupo) = {n_ativos}")
+    print(f"N (colaboradores ativos no rodizio normal) = {n_ativos}")
+    print(f"Reservas FIXO_RECORRENTE configuradas: {len(regras_fixas)}")
     print(f"Ronda a escrever: {len(ronda_para_escrever)} quartas-feiras "
           f"({ronda_para_escrever[0]} a {ronda_para_escrever[-1]})\n")
 
     decisoes = processar_bloco(ronda_para_escrever, aplicar_cruzados=True, ronda_aberta=True)
 
     print(f"Escrevendo {DEPARTAMENTO}/{FUNCAO}/{DIA} na coluna "
-          f"MINISTRO (col {col_ministro + 1}) de {AGENDA_TITLE}...\n")
+          f"MINISTRO (col {col_ministro + 1}) de {agenda_title}...\n")
 
     # Acumula todas as celulas da Ronda e escreve numa UNICA chamada de API
     # (2026-09-08, pedido do Clayton para economizar cota depois de bater em
@@ -306,7 +368,7 @@ def main() -> None:
         print("\nNenhuma celula nova para escrever.")
         return
 
-    guard.batch_update_cells(AGENDA_TITLE, updates)
+    guard.batch_update_cells(agenda_title, updates)
 
     print(f"\n{len(updates)} celula(s) escrita(s) em lote (1 requisicao de API)."
           " Colunas MINISTRO e EMAIL MINISTRO foram escritas.")

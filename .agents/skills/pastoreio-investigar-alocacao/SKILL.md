@@ -46,6 +46,22 @@ não entra em cursor, CEIA, replay, lacuna, GAP_FILL/RESGATE ou quota do novo
 motor. Ainda assim, compromissos reais anteriores ao corte podem aparecer em
 filtros temporais, como descanso cruzado.
 
+## Diagnóstico padrão para QUARTA-FEIRA
+
+Quando a pergunta for sobre `D. MINISTROS / MINISTRO / QUARTA-FEIRA`, use:
+
+```
+uv run python scripts/diagnosticar_alocacao_quarta.py --data AAAA-MM-DD
+```
+
+O diagnóstico é read-only. Ele mostra `DATA_CORTE_HISTORICO`, tema, semana do
+mês, valor atual na agenda e a avaliação de reservas
+`FIXO_RECORRENTE` antes do rodízio normal. Se uma reserva aplica, o resultado
+esperado vem da reserva e o rodízio normal não executa para aquela data. Se
+não aplica, investigue o fluxo normal de tema/nível/candidatos. Lembre:
+`TIPO ALOCAÇÃO` define natureza da regra; `PRIORIDADE` não deve ser usada
+para simular reserva fixa.
+
 ## Onde procurar evidência, por categoria
 
 Percorra estes pontos na ordem em que `motor.py` os aplica (etapa 1 =

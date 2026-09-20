@@ -53,6 +53,11 @@ grupo) vivem em `.agents/skills/` — ver secção "Skills" abaixo.
   o cursor normal. Repetição mensal, obrigação de `ALOCAR TODOS OS MESES`,
   CEIA, resgate, lacuna e candidatos apenas analisados/rejeitados não movem
   esse cursor.
+- Em QUARTA-FEIRA, `TIPO ALOCAÇÃO = FIXO_RECORRENTE` significa reserva de
+  data, não prioridade. A reserva é avaliada antes do rodízio normal, fica
+  fora do pool normal nas datas em que não aplica, não consome rodízio por
+  nível/tema e não conta como participação-base de colaborador normal. Ver
+  `CONCEITO_QUARTA_FEIRA.md`.
 - Em DOMINGO, `TIPO_DIA` é separado de motivo/intenção/política de seleção:
   um `DOMINGO_NORMAL` pode ser `NORMAL_ROTATION`, `MONTHLY_REPEAT`,
   `EVERY_MONTH_OBLIGATION` ou `GAP_FILL`. `GAP_FILL` explica a existência da
@@ -124,8 +129,13 @@ Escrita permitida/proibida, resumido:
 Neste momento, `scripts/preencher_claude_appanualglobal_domingo.py` está
 habilitado para produtivo quando executado com `--produtivo`; nesse modo ele
 pode escrever em `AppAnualGlobal` e `LOG_AUDITORIA` via allowlist explícita.
-Sem essa flag, continua usando `CLAUDE_*`. Isso não promove automaticamente
-QUARTA-FEIRA, CEIA, auxiliares, sincronização de BP ou scripts de limpeza.
+Sem essa flag, continua usando `CLAUDE_*`.
+
+Também está habilitado para produtivo o processo
+`scripts/preencher_claude_appanualglobal_quarta.py`, quando executado com
+`--produtivo`; nesse modo ele pode escrever em `AppAnualGlobal` via allowlist
+explícita. Isso não promove automaticamente CEIA, auxiliares, sincronização
+de BP ou scripts de limpeza.
 
 ## Testes
 

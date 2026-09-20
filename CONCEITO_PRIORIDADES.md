@@ -105,6 +105,13 @@ por completo — ele nem chega na cascata de desempate:
 10. **Descanso mínimo de 7 dias** desde a última vez que serviu (a menos que
     tenha `sinc_colaborador` forçando a sincronia).
 
+Antes destes filtros normais, em `D. MINISTROS / MINISTRO / QUARTA-FEIRA`,
+o processo avalia reservas `FIXO_RECORRENTE`. Esse tipo de alocação não é
+um candidato com prioridade alta: é uma reserva de data. Se a recorrência
+aplica, a vaga é preenchida pela reserva e o rodízio normal não executa para
+aquele slot. Se não aplica, a regra fixa fica fora do pool normal. Ver
+`CONCEITO_QUARTA_FEIRA.md`.
+
 Se **ninguém** sobreviver a essa cascata, o motor tenta o **RESGATE**
 (`ignorar_vizinhanca_e_descanso=True`): pool restrito a quem tem
 `ALOCAR TODOS OS MESES=false` **e** `ALOCAÇÃO EXTRA=true`, e dentro desse
@@ -302,6 +309,8 @@ PRIORIDADE) estiver validada em produção.
   de `alocar_grupo` para grupos DOMINGO.
 - [[CONCEITO_CICLO]] — conceito de rotação/ciclo em que as Rondas se
   encaixam.
+- [[CONCEITO_QUARTA_FEIRA]] — regras próprias da quarta-feira, incluindo
+  `FIXO_RECORRENTE`.
 - `src/pastoreio_orquestrador/motor.py`: `avaliar_candidatos_para_slot`
   (etapa 1), `chave_ordenacao_candidato` (etapa 2), `_avaliar_e_escolher`
   (junta as duas + resgate).

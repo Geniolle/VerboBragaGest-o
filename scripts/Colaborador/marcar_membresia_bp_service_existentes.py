@@ -307,6 +307,12 @@ def encontrar_match(
         pessoa = candidatos_telefone[0]
         if not conflito_nome_data(pessoa, identidade):
             return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "TELEFONE", pessoa.nome)
+        return Ambiguidade(
+            identidade.linha,
+            identidade.nome_original,
+            "TELEFONE encontrou um registo, mas nome/data conflitam",
+            (pessoa.id_user,) if pessoa.id_user else (),
+        )
     if len(candidatos_telefone) > 1:
         return resolver_multiplos_por_desempate(candidatos_telefone, identidade, "TELEFONE")
 
@@ -469,6 +475,52 @@ def calcular_matches(
     return encontrados, ambiguos, criacoes
 
 
+def validar_criacoes_bp_service(
+    bp_service: list[list[str]],
+    criacoes: list[Criacao],
+) -> tuple[list[Criacao], list[Criacao]]:
+    idx_bp = map_headers(bp_service[0])
+    por_id: dict[str, list[PessoaBp]] = {}
+
+    for linha, row in enumerate(bp_service[1:], start=2):
+        pessoa = PessoaBp(
+            linha=linha,
+            id_user=get(row, idx_bp, ColBpService.ID_USER),
+            nome=normalize_text(get(row, idx_bp, ColBpService.NOME)),
+            email=normalize_email(get(row, idx_bp, ColBpService.EMAIL)),
+            telefone=normalize_phone(get(row, idx_bp, ColBpService.TELEFONE)),
+            number_whatsapp=normalize_phone(get(row, idx_bp, ColBpService.NUMBER_WHATSAPP)),
+            nascimento=normalize_date(get(row, idx_bp, ColBpService.DATA_NASCIMENTO)),
+        )
+        if pessoa.id_user:
+            por_id.setdefault(pessoa.id_user, []).append(pessoa)
+
+    validadas: list[Criacao] = []
+    falhadas: list[Criacao] = []
+
+    for criacao in criacoes:
+        candidatos = por_id.get(criacao.id_user, [])
+        if len(candidatos) != 1:
+            falhadas.append(criacao)
+            continue
+
+        pessoa = candidatos[0]
+        identidade = criacao.identidade
+        if identidade.nome and pessoa.nome != identidade.nome:
+            falhadas.append(criacao)
+            continue
+        if identidade.email and pessoa.email != identidade.email:
+            falhadas.append(criacao)
+            continue
+        if identidade.telefone and identidade.telefone not in pessoa.telefones:
+            falhadas.append(criacao)
+            continue
+
+        validadas.append(criacao)
+
+    return validadas, falhadas
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--aplicar", action="store_true", help="Cria/valida BP SERVICE e marca TRUE na Membresia.")
@@ -504,11 +556,27 @@ def main() -> None:
         print(f"Linha={item.identidade.linha} Nome={item.identidade.nome_original!r} Novo ID_USER={item.id_user}")
 
     if args.aplicar:
+        criacoes_validadas = criacoes
+        criacoes_falhadas: list[Criacao] = []
         if criacoes:
             guard.append_rows(SHEET_BP_SERVICE, [item.row for item in criacoes])
             print(f"\nCriadas {len(criacoes)} linhas em BP SERVICE.")
+            bp_service_pos_criacao = guard.read_worksheet(SHEET_BP_SERVICE)
+            criacoes_validadas, criacoes_falhadas = validar_criacoes_bp_service(
+                bp_service_pos_criacao,
+                criacoes,
+            )
+            print(f"Criacoes validadas em BP SERVICE: {len(criacoes_validadas)}")
+            if criacoes_falhadas:
+                print("Criacoes NAO validadas; Membresia.BP SERVICE nao sera marcada:")
+                for item in criacoes_falhadas:
+                    print(
+                        f"Linha={item.identidade.linha} "
+                        f"Nome={item.identidade.nome_original!r} "
+                        f"ID_USER={item.id_user}"
+                    )
         updates = [(item.linha_membresia, col_flag, "TRUE") for item in encontrados]
-        updates.extend((item.identidade.linha, col_flag, "TRUE") for item in criacoes)
+        updates.extend((item.identidade.linha, col_flag, "TRUE") for item in criacoes_validadas)
         if updates:
             guard.batch_update_cells(SHEET_MEMBRESIA, updates)
             print(f"Atualizadas {len(updates)} linhas em Membresia.BP SERVICE.")

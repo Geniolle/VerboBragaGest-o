@@ -39,7 +39,9 @@ const BP_SERVICE_COLS = {
   CODIGO_POSTAL: 'CÓDIGO POSTAL',
   MORADA: 'MORADA',
   FREGUESIA: 'FREGUESIA',
-  DISCIPULADO: 'DISCIPULADO VERBO DA VIDA'
+  DISCIPULADO: 'DISCIPULADO VERBO DA VIDA',
+  TYPE: 'TYPE',
+  INATIVO: 'INATIVO'
 };
 
 function sincronizarMembresiaComBPService() {
@@ -318,6 +320,9 @@ function buildBpIndexes(bpValues, bpHeaders) {
 
   for (let i = 1; i < bpValues.length; i++) {
     const user = parseBpUser_(bpValues[i], bpHeaders, i + 1);
+    if (user.type || user.inativo) {
+      continue;
+    }
     users.push(user);
     addToIndex_(byEmail, user.email, user);
     user.phones.forEach(phone => addToIndex_(byPhone, phone, user));
@@ -343,7 +348,9 @@ function parseBpUser_(row, bpHeaders, rowIndex) {
     telefone,
     numberWhatsApp,
     phones,
-    nameBirthKey: name && birth ? `${name}|${birth}` : ''
+    nameBirthKey: name && birth ? `${name}|${birth}` : '',
+    type: String(getCell_(row, bpHeaders, BP_SERVICE_COLS.TYPE) || '').trim(),
+    inativo: isTruthy(getCell_(row, bpHeaders, BP_SERVICE_COLS.INATIVO))
   };
 }
 
@@ -381,6 +388,13 @@ function findExistingBpUser(membresiaRow, membresiaHeaders, bpIndexes) {
   });
   const uniquePhoneCandidates = uniqueUsers_(phoneCandidates);
   if (uniquePhoneCandidates.length === 1) {
+    if (hasNameBirthConflict_(uniquePhoneCandidates[0], memb)) {
+      return {
+        status: 'ambiguous',
+        candidates: uniquePhoneCandidates,
+        reason: 'telefone encontrou um registo, mas nome/data conflitam'
+      };
+    }
     return { status: 'found', user: uniquePhoneCandidates[0], method: 'TELEFONE' };
   }
   if (uniquePhoneCandidates.length > 1) {
@@ -406,6 +420,16 @@ function findExistingBpUser(membresiaRow, membresiaHeaders, bpIndexes) {
   }
 
   return { status: 'none' };
+}
+
+function hasNameBirthConflict_(user, memb) {
+  if (memb.nameBirthKey && user.nameBirthKey) {
+    return memb.nameBirthKey !== user.nameBirthKey;
+  }
+  if (memb.name && user.name && memb.name !== user.name && memb.birth && user.birth) {
+    return true;
+  }
+  return false;
 }
 
 function parseMembresiaIdentity_(row, headers) {

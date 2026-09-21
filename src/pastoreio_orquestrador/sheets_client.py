@@ -115,6 +115,15 @@ class SpreadsheetGuard:
         ]
         ws.batch_update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
 
+    def batch_clear_cells(self, title: str, cells: list[tuple[int, int]]) -> None:
+        """Limpa varias celulas numa unica chamada de API."""
+        self._assert_can_write(title)
+        if not cells:
+            return
+        ws = self.spreadsheet.worksheet(title)
+        ranges = [gspread.utils.rowcol_to_a1(row, col) for row, col in cells]
+        ws.batch_clear(ranges)
+
     def append_row(self, title: str, values: list[str]) -> None:
         self._assert_can_write(title)
         ws = self.spreadsheet.worksheet(title)

@@ -75,3 +75,75 @@ Antes de qualquer execução real:
 Depois de qualquer alteração no subprocesso, volte a avaliar se esta skill
 continua atualizada e rode a suite do projeto quando houver código Python
 alterado.
+
+## Subprocesso: Atualizar BP AUTORITY
+
+Implementação:
+`../../../scripts/Colaborador/atualizar_bp_autority.py`.
+
+Objetivo: sincronizar permissões de colaborador na sheet `BP AUTORITY` a
+partir dos departamentos marcados em `BP SERVICE`.
+
+Escopo de entrada:
+
+- `BP SERVICE.INATIVO != true`;
+- `BP SERVICE.DEPARTAMENTOS = true`;
+- `BP SERVICE.BP AUTORITY` vazio.
+
+Regras:
+
+- localizar a pessoa em `BP AUTORITY` por `ID_USER`;
+- se existir, marcar como `TRUE` as colunas `COLABORADOR_*` correspondentes
+  aos departamentos `D.*=true` em `BP SERVICE`;
+- se não existir, criar uma nova linha em `BP AUTORITY` com `ID_USER`,
+  `NOME`, `TELEFONE`, `EMAIL`, `FOTO DO PERFIL` e as colunas
+  `COLABORADOR_*` existentes correspondentes;
+- se uma coluna `COLABORADOR_*` não existir no cabeçalho da `BP AUTORITY`,
+  ignorar esse departamento, sem tratar como divergência;
+- só marcar `BP SERVICE.BP AUTORITY=TRUE` depois que o registo em
+  `BP AUTORITY` existir ou tiver sido criado e validado.
+
+O script roda em dry-run por padrão. Use `--aplicar` somente depois de
+validar o plano:
+
+```text
+uv run python scripts/Colaborador/atualizar_bp_autority.py
+uv run python scripts/Colaborador/atualizar_bp_autority.py --aplicar
+```
+
+## Subprocesso: Reconciliar BP AUTORITY
+
+Implementação:
+`../../../scripts/Colaborador/reconciliar_bp_autority.py`.
+
+Objetivo: remover lixo da `BP AUTORITY` quando um líder remove um
+colaborador de um departamento em `BP SERVICE`.
+
+Regra: `BP SERVICE` é a fonte da verdade. Qualquer permissão
+`COLABORADOR_*` existente em `BP AUTORITY` precisa continuar existindo como
+departamento `D.*=true` em `BP SERVICE`.
+
+O subprocesso:
+
+- limpa `COLABORADOR_*` em `BP AUTORITY` quando o departamento
+  correspondente não está mais marcado em `BP SERVICE`;
+- limpa todos os `COLABORADOR_*` quando o `ID_USER` não existe em
+  `BP SERVICE`, está `INATIVO=true`, ou não tem `DEPARTAMENTOS=true`;
+- elimina a linha da `BP AUTORITY` quando, depois da limpeza, não resta
+  nenhum campo de permissão preenchido;
+- limpa `BP SERVICE.BP AUTORITY` quando a linha correspondente da
+  `BP AUTORITY` for eliminada.
+
+Campos de identidade (`ID_USER`, `NOME`, `TELEFONE`, `EMAIL`,
+`FOTO DO PERFIL`, `USEREMAIL`, `TIMESTAMP`) não contam como permissão para
+decidir se a linha deve continuar existindo. Campos de permissão são
+`USER_ALL`, `DEPARTAMENTOS_*`, `GERAL_DEPARTAMENTOS`, `MANAGER_*`,
+`COORDENADOR_*` e `COLABORADOR_*`.
+
+O script roda em dry-run por padrão. Use `--aplicar` somente depois de
+validar o plano:
+
+```text
+uv run python scripts/Colaborador/reconciliar_bp_autority.py
+uv run python scripts/Colaborador/reconciliar_bp_autority.py --aplicar
+```

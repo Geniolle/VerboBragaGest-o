@@ -174,3 +174,16 @@ class SpreadsheetGuard:
             )
         ws = self.spreadsheet.worksheet(title)
         self.spreadsheet.del_worksheet(ws)
+
+    def delete_rows(self, title: str, rows: list[int]) -> None:
+        """Apaga linhas especificas de uma aba permitida, de baixo para cima.
+
+        Usado por processos produtivos com allowlist explicita quando a regra
+        de negocio exige remover linhas obsoletas sem apagar a worksheet.
+        """
+        self._assert_can_write(title)
+        if not rows:
+            return
+        ws = self.spreadsheet.worksheet(title)
+        for row in sorted(set(rows), reverse=True):
+            ws.delete_rows(row)

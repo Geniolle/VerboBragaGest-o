@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
+ETAPA_TIMEOUT_SECONDS = 180
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,16 @@ def run_etapa(etapa: Etapa, aplicar: bool) -> ResultadoEtapa:
     print("=" * 79, flush=True)
 
     started_at = time.perf_counter()
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True, timeout=ETAPA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.perf_counter() - started_at
+        print(
+            f"\n[TIMEOUT] {etapa.nome}: excedeu {ETAPA_TIMEOUT_SECONDS}s "
+            f"apos {format_duration(elapsed)}",
+            flush=True,
+        )
+        raise SystemExit(exc.timeout) from exc
     elapsed = time.perf_counter() - started_at
     print(f"\n[DURACAO] {etapa.nome}: {format_duration(elapsed)}", flush=True)
     return ResultadoEtapa(nome=etapa.nome, duracao_segundos=elapsed)

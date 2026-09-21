@@ -28,6 +28,24 @@ LAST_LOG = RUNTIME_DIR / "colaborador_ultimo.log"
 COCKPIT = ROOT_DIR / "scripts" / "Colaborador" / "cockpit_colaborador.py"
 
 
+def cleanup_temp_logs(active_tmp: Path | None = None) -> None:
+    """Remove restos de execucoes interrompidas.
+
+    O servidor deve manter somente o ultimo log consolidado. Durante uma
+    execucao normal existe um unico .tmp ativo; qualquer outro .tmp e lixo.
+    """
+    if not RUNTIME_DIR.exists():
+        return
+    active = active_tmp.resolve() if active_tmp is not None else None
+    for path in RUNTIME_DIR.glob("colaborador_*.log.tmp"):
+        try:
+            if active is not None and path.resolve() == active:
+                continue
+            path.unlink()
+        except OSError:
+            pass
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -105,6 +123,7 @@ def build_command(aplicar: bool) -> list[str]:
 
 def run_cockpit(aplicar: bool) -> int:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    cleanup_temp_logs()
     fd, tmp_name = tempfile.mkstemp(
         prefix="colaborador_",
         suffix=".log.tmp",
@@ -142,6 +161,7 @@ def run_cockpit(aplicar: bool) -> int:
             log.write("###############################################################################\n")
 
         os.replace(tmp_path, LAST_LOG)
+        cleanup_temp_logs()
         return result.returncode
     finally:
         if tmp_path.exists():

@@ -16,3 +16,4 @@ credentials/*.json
 # Saidas de investigacao/depuracao pontuais, nao fazem parte do codigo
 scratch/
 tmp_pytest*/
+runtime/

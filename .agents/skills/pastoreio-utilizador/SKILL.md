@@ -5,9 +5,36 @@ description: Implementa e opera processos de Utilizador que sincronizam ou criam
 
 # Processo Utilizador
 
-Processos de Utilizador tratam cadastro de pessoas antes de qualquer regra de
-alocação. Eles são separados do fluxo `BP SERVICE -> BP ALGORITIMO` e não
-devem mexer em departamentos, funções, prioridades ou regras do motor.
+Processos de Utilizador/Colaborador tratam cadastro de pessoas e projeções
+operacionais derivadas de `BP SERVICE` antes de qualquer regra de alocação.
+Eles não devem mexer em prioridades, calendários ou regras do motor.
+
+## Cockpit operacional
+
+Ponto de entrada:
+`../../../scripts/Colaborador/cockpit_colaborador.py`.
+
+Ordem oficial de execução dos subprocessos:
+
+1. analisar pendentes `Membresia -> BP SERVICE`;
+2. marcar `Membresia.BP SERVICE=TRUE` para pessoas já existentes;
+3. validar `BP SERVICE.DEPARTAMENTOS` contra colunas `D.*`;
+4. atualizar `BP COLABORADOR` a partir de `BP SERVICE`;
+5. atualizar `BP AUTORITY` a partir de `BP SERVICE`;
+6. reconciliar/remover lixo de `BP AUTORITY` contra `BP SERVICE`;
+7. sincronizar `BP AUTORITY -> BP ALGORITIMO`.
+
+O cockpit roda em dry-run por padrão:
+
+```text
+uv run python scripts/Colaborador/cockpit_colaborador.py
+```
+
+Para aplicar escritas controladas nos subprocessos que suportam `--aplicar`:
+
+```text
+uv run python scripts/Colaborador/cockpit_colaborador.py --aplicar
+```
 
 ## Subprocesso: Criar no utilizador Membresia
 
@@ -111,6 +138,36 @@ uv run python scripts/Colaborador/atualizar_bp_autority.py
 uv run python scripts/Colaborador/atualizar_bp_autority.py --aplicar
 ```
 
+## Subprocesso: Atualizar BP COLABORADOR
+
+Implementação:
+`../../../scripts/Colaborador/atualizar_bp_colaborador.py`.
+
+Auditoria read-only:
+`../../../scripts/Colaborador/analisar_bp_colaborador.py`.
+
+Objetivo: sincronizar a matriz `BP COLABORADOR` a partir das colunas
+`D.*` da `BP SERVICE`.
+
+Regras:
+
+- `BP SERVICE` é a fonte da verdade;
+- processa apenas colaboradores com `INATIVO != true`, `TYPE` vazio e
+  `NOME` preenchido;
+- cada coluna `FUNC_*` de `BP COLABORADOR` é preenchida com os nomes de
+  `BP SERVICE` cujo departamento `D.*` correspondente esteja `TRUE`;
+- colunas `FUNC_*` sem origem `D.*` correspondente são preservadas. Exemplo
+  atual: `FUNC_CEIA`;
+- o subprocesso limpa nomes a mais e inclui nomes em falta, reescrevendo as
+  colunas geridas de forma idempotente.
+
+O script roda em dry-run por padrão:
+
+```text
+uv run python scripts/Colaborador/atualizar_bp_colaborador.py
+uv run python scripts/Colaborador/atualizar_bp_colaborador.py --aplicar
+```
+
 ## Subprocesso: Reconciliar BP AUTORITY
 
 Implementação:
@@ -146,4 +203,45 @@ validar o plano:
 ```text
 uv run python scripts/Colaborador/reconciliar_bp_autority.py
 uv run python scripts/Colaborador/reconciliar_bp_autority.py --aplicar
+```
+
+## Subprocesso: Sincronizar BP AUTORITY -> BP ALGORITIMO
+
+Implementação:
+`../../../scripts/Colaborador/sincronizar_bp_autority_bp_algoritimo.py`.
+
+Objetivo: garantir que vínculos de colaborador/departamento existentes em
+`BP AUTORITY` também existam como vínculos ativos em `BP ALGORITIMO`, e que
+vínculos ativos em `BP ALGORITIMO` não continuem ativos quando não existem
+mais em `BP AUTORITY`.
+
+Regras:
+
+- cada `COLABORADOR_* = TRUE` em `BP AUTORITY` vira um vínculo
+  `ID_USER + NOME + DEPARTAMENTO` em `BP ALGORITIMO`;
+- o vínculo só é considerado quando o mesmo `ID_USER` em `BP SERVICE` tem
+  `TYPE` vazio; contas de sistema/placeholders com `TYPE` preenchido não
+  entram no `BP ALGORITIMO`;
+- a coluna de autoridade só é considerada quando existe um departamento
+  `D.*` correspondente no cabeçalho de `BP SERVICE`;
+- se o vínculo já existe em `BP ALGORITIMO` e está inativo, ele é reativado;
+- se o vínculo não existe, uma linha nova é inserida com `ID_USER`, `NOME`,
+  `DEPARTAMENTO` e `ATIVO=TRUE`;
+- se um vínculo ativo de `BP ALGORITIMO`, para departamento gerido pela
+  `BP AUTORITY`, não existe mais em `BP AUTORITY`, ele é marcado
+  `ATIVO=FALSE`.
+- se houver duplicados ativos do mesmo `NOME + DEPARTAMENTO`, o subprocesso
+  mantém uma linha principal e elimina fisicamente as linhas duplicadas;
+- `BP ALGORITIMO.ID_USER` deve sempre ser igual ao `BP SERVICE.ID_USER`;
+  o script corrige divergências mesmo em linhas inativas/legadas quando o
+  nome existe de forma inequívoca em `BP SERVICE`.
+
+Auditoria read-only para ID_USER:
+`../../../scripts/Colaborador/auditar_id_user_bp_algoritimo.py`.
+
+O script roda em dry-run por padrão:
+
+```text
+uv run python scripts/Colaborador/sincronizar_bp_autority_bp_algoritimo.py
+uv run python scripts/Colaborador/sincronizar_bp_autority_bp_algoritimo.py --aplicar
 ```

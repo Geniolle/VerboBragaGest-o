@@ -1,8 +1,8 @@
-"""Marca Membresia.BP SERVICE=TRUE para pessoas ja existentes em BP SERVICE.
+"""Sincroniza Membresia -> BP SERVICE.
 
-Processo Utilizador / Membresia. Este script nao cria colaboradores e nao
-altera BP SERVICE. Por padrao roda em dry-run; use --aplicar para escrever a
-flag apenas nas linhas com match inequivoco.
+Processo Utilizador / Membresia. Marca a flag quando a pessoa ja existe em
+BP SERVICE e cria um novo registo quando nao existe match seguro. Por padrao
+roda em dry-run; use --aplicar para escrever nas sheets.
 """
 
 from __future__ import annotations
@@ -25,7 +25,12 @@ class ColMembresia:
     DATA_NASCIMENTO = "Data de Nascimento"
     EMAIL = "Email"
     TELEFONE = "Contacto Telefónico"
+    TEM_WHATSAPP = "O número acima tem WhatsApp"
     NUMBER_WHATSAPP = "Nº WhatsApp"
+    CODIGO_POSTAL = "Código Postal"
+    MORADA = "Morada"
+    FREGUESIA = "Freguesia"
+    DISCIPULADO = "Discipulado Verbo da Vida"
     FLAG_BP_SERVICE = "BP SERVICE"
 
 
@@ -35,7 +40,14 @@ class ColBpService:
     DATA_NASCIMENTO = "DATA NASCIMENTO"
     EMAIL = "EMAIL"
     TELEFONE = "TELEFONE"
+    WHATSAPP = "WHATSAPP"
     NUMBER_WHATSAPP = "NUMBER_WHATSAPP"
+    CODIGO_POSTAL = "CÓDIGO POSTAL"
+    MORADA = "MORADA"
+    FREGUESIA = "FREGUESIA"
+    DISCIPULADO = "DISCIPULADO VERBO DA VIDA"
+    TYPE = "TYPE"
+    INATIVO = "INATIVO"
 
 
 @dataclass(frozen=True)
@@ -82,6 +94,7 @@ class Match:
     nome: str
     id_user: str
     metodo: str
+    nome_bp: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,6 +103,13 @@ class Ambiguidade:
     nome: str
     motivo: str
     ids_possiveis: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Criacao:
+    identidade: IdentidadeMembresia
+    id_user: str
+    row: list[str]
 
 
 def map_headers(header: list[str]) -> dict[str, int]:
@@ -142,6 +162,15 @@ def is_true(valor: object) -> bool:
     return normalize_text(valor) == "TRUE"
 
 
+def parse_whatsapp(valor: object) -> bool | None:
+    texto = normalize_text(valor)
+    if texto == "SIM":
+        return True
+    if texto in {"NAO", "NÃO"}:
+        return False
+    return None
+
+
 def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaBp]], dict[str, list[PessoaBp]], dict[str, list[PessoaBp]]]:
     idx = map_headers(valores[0])
     validar_colunas(
@@ -153,6 +182,8 @@ def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaB
             ColBpService.EMAIL,
             ColBpService.TELEFONE,
             ColBpService.NUMBER_WHATSAPP,
+            ColBpService.TYPE,
+            ColBpService.INATIVO,
         ),
         SHEET_BP_SERVICE,
     )
@@ -161,6 +192,8 @@ def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaB
     por_nome_nascimento: dict[str, list[PessoaBp]] = {}
 
     for linha, row in enumerate(valores[1:], start=2):
+        if get(row, idx, ColBpService.TYPE) or is_true(get(row, idx, ColBpService.INATIVO)):
+            continue
         pessoa = PessoaBp(
             linha=linha,
             id_user=get(row, idx, ColBpService.ID_USER),
@@ -204,11 +237,26 @@ def unicos(pessoas: list[PessoaBp]) -> list[PessoaBp]:
     return resultado
 
 
+def conflito_nome_data(pessoa: PessoaBp, identidade: IdentidadeMembresia) -> bool:
+    if identidade.nome_nascimento and pessoa.nome_nascimento:
+        return identidade.nome_nascimento != pessoa.nome_nascimento
+    if identidade.nome and pessoa.nome and identidade.nome != pessoa.nome and identidade.nascimento and pessoa.nascimento:
+        return True
+    return False
+
+
 def resolver_multiplos_por_desempate(candidatos: list[PessoaBp], identidade: IdentidadeMembresia, metodo_base: str) -> Match | Ambiguidade:
     candidatos = unicos(candidatos)
     if len(candidatos) == 1:
         pessoa = candidatos[0]
-        return Match(identidade.linha, identidade.nome_original, pessoa.id_user, metodo_base)
+        if metodo_base.startswith("TELEFONE") and conflito_nome_data(pessoa, identidade):
+            return Ambiguidade(
+                identidade.linha,
+                identidade.nome_original,
+                "TELEFONE encontrou um registo, mas nome/data conflitam",
+                (pessoa.id_user,) if pessoa.id_user else (),
+            )
+        return Match(identidade.linha, identidade.nome_original, pessoa.id_user, metodo_base, pessoa.nome)
 
     for telefone, sufixo in (
         (identidade.telefone, "TELEFONE"),
@@ -219,13 +267,15 @@ def resolver_multiplos_por_desempate(candidatos: list[PessoaBp], identidade: Ide
         filtrados = [p for p in candidatos if telefone in p.telefones]
         if len(filtrados) == 1:
             pessoa = filtrados[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+{sufixo}")
+            if metodo_base.startswith("TELEFONE") and conflito_nome_data(pessoa, identidade):
+                continue
+            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+{sufixo}", pessoa.nome)
 
     if identidade.nome_nascimento:
         filtrados = [p for p in candidatos if p.nome_nascimento == identidade.nome_nascimento]
         if len(filtrados) == 1:
             pessoa = filtrados[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+NOME+DATA_NASCIMENTO")
+            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+NOME+DATA_NASCIMENTO", pessoa.nome)
 
     return Ambiguidade(
         identidade.linha,
@@ -245,7 +295,7 @@ def encontrar_match(
         candidatos = por_email.get(identidade.email, [])
         if len(candidatos) == 1:
             pessoa = candidatos[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "EMAIL")
+            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "EMAIL", pessoa.nome)
         if len(candidatos) > 1:
             return resolver_multiplos_por_desempate(candidatos, identidade, "EMAIL")
 
@@ -255,7 +305,8 @@ def encontrar_match(
     candidatos_telefone = unicos(candidatos_telefone)
     if len(candidatos_telefone) == 1:
         pessoa = candidatos_telefone[0]
-        return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "TELEFONE")
+        if not conflito_nome_data(pessoa, identidade):
+            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "TELEFONE", pessoa.nome)
     if len(candidatos_telefone) > 1:
         return resolver_multiplos_por_desempate(candidatos_telefone, identidade, "TELEFONE")
 
@@ -263,7 +314,7 @@ def encontrar_match(
         candidatos_nome = por_nome_nascimento.get(identidade.nome_nascimento, [])
         if len(candidatos_nome) == 1:
             pessoa = candidatos_nome[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "NOME+DATA_NASCIMENTO")
+            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "NOME+DATA_NASCIMENTO", pessoa.nome)
         if len(candidatos_nome) > 1:
             return Ambiguidade(
                 identidade.linha,
@@ -275,10 +326,76 @@ def encontrar_match(
     return None
 
 
+def collect_existing_numeric_ids(bp_service: list[list[str]]) -> set[int]:
+    idx = map_headers(bp_service[0])
+    ids: set[int] = set()
+    for row in bp_service[1:]:
+        raw = get(row, idx, ColBpService.ID_USER)
+        if re.fullmatch(r"\d+", raw):
+            ids.add(int(raw))
+    return ids
+
+
+def next_user_id(existing: set[int]) -> str:
+    candidate = max(existing or {0}) + 1
+    while candidate in existing:
+        candidate += 1
+    existing.add(candidate)
+    return str(candidate)
+
+
+def format_date_for_bp_service(valor: object) -> str:
+    normalized = normalize_date(valor)
+    if not normalized:
+        return ""
+    yyyy, mm, dd = normalized.split("-")
+    return f"{dd}/{mm}/{yyyy}"
+
+
+def set_value(row: list[str], idx: dict[str, int], col: str, value: object) -> None:
+    i = idx.get(col)
+    if i is not None:
+        row[i] = value
+
+
+def build_new_bp_row(
+    identidade: IdentidadeMembresia,
+    membresia_row: list[str],
+    idx_membresia: dict[str, int],
+    bp_header: list[str],
+    idx_bp: dict[str, int],
+    id_user: str,
+) -> list[str]:
+    row: list[object] = [""] * len(bp_header)
+    whatsapp = parse_whatsapp(get(membresia_row, idx_membresia, ColMembresia.TEM_WHATSAPP))
+
+    set_value(row, idx_bp, ColBpService.ID_USER, id_user)
+    set_value(row, idx_bp, ColBpService.NOME, identidade.nome_original)
+    set_value(row, idx_bp, ColBpService.TELEFONE, get(membresia_row, idx_membresia, ColMembresia.TELEFONE))
+    set_value(row, idx_bp, ColBpService.EMAIL, get(membresia_row, idx_membresia, ColMembresia.EMAIL))
+    set_value(row, idx_bp, ColBpService.CODIGO_POSTAL, get(membresia_row, idx_membresia, ColMembresia.CODIGO_POSTAL))
+    set_value(row, idx_bp, ColBpService.MORADA, get(membresia_row, idx_membresia, ColMembresia.MORADA))
+    set_value(row, idx_bp, ColBpService.FREGUESIA, get(membresia_row, idx_membresia, ColMembresia.FREGUESIA))
+    set_value(
+        row,
+        idx_bp,
+        ColBpService.DATA_NASCIMENTO,
+        format_date_for_bp_service(get(membresia_row, idx_membresia, ColMembresia.DATA_NASCIMENTO)),
+    )
+    set_value(row, idx_bp, ColBpService.DISCIPULADO, get(membresia_row, idx_membresia, ColMembresia.DISCIPULADO))
+
+    if whatsapp is not None:
+        set_value(row, idx_bp, ColBpService.WHATSAPP, whatsapp)
+    if whatsapp is False:
+        set_value(row, idx_bp, ColBpService.NUMBER_WHATSAPP, get(membresia_row, idx_membresia, ColMembresia.NUMBER_WHATSAPP))
+
+    return ["" if value is None else value for value in row]
+
+
 def calcular_matches(
     membresia: list[list[str]],
     bp_service: list[list[str]],
-) -> tuple[list[Match], list[Ambiguidade], list[IdentidadeMembresia]]:
+) -> tuple[list[Match], list[Ambiguidade], list[Criacao]]:
     idx_membresia = map_headers(membresia[0])
     validar_colunas(
         idx_membresia,
@@ -287,16 +404,40 @@ def calcular_matches(
             ColMembresia.DATA_NASCIMENTO,
             ColMembresia.EMAIL,
             ColMembresia.TELEFONE,
+            ColMembresia.TEM_WHATSAPP,
             ColMembresia.NUMBER_WHATSAPP,
+            ColMembresia.CODIGO_POSTAL,
+            ColMembresia.MORADA,
+            ColMembresia.FREGUESIA,
+            ColMembresia.DISCIPULADO,
             ColMembresia.FLAG_BP_SERVICE,
         ),
         SHEET_MEMBRESIA,
     )
+    idx_bp = map_headers(bp_service[0])
+    validar_colunas(
+        idx_bp,
+        (
+            ColBpService.ID_USER,
+            ColBpService.NOME,
+            ColBpService.DATA_NASCIMENTO,
+            ColBpService.EMAIL,
+            ColBpService.TELEFONE,
+            ColBpService.WHATSAPP,
+            ColBpService.NUMBER_WHATSAPP,
+            ColBpService.CODIGO_POSTAL,
+            ColBpService.MORADA,
+            ColBpService.FREGUESIA,
+            ColBpService.DISCIPULADO,
+        ),
+        SHEET_BP_SERVICE,
+    )
     por_email, por_telefone, por_nome_nascimento = indexar_bp_service(bp_service)
+    existing_ids = collect_existing_numeric_ids(bp_service)
 
     encontrados: list[Match] = []
     ambiguos: list[Ambiguidade] = []
-    nao_encontrados: list[IdentidadeMembresia] = []
+    criacoes: list[Criacao] = []
 
     for linha, row in enumerate(membresia[1:], start=2):
         flag = get(row, idx_membresia, ColMembresia.FLAG_BP_SERVICE)
@@ -309,49 +450,70 @@ def calcular_matches(
         elif isinstance(resultado, Ambiguidade):
             ambiguos.append(resultado)
         else:
-            nao_encontrados.append(identidade)
+            id_user = next_user_id(existing_ids)
+            criacoes.append(
+                Criacao(
+                    identidade=identidade,
+                    id_user=id_user,
+                    row=build_new_bp_row(
+                        identidade,
+                        row,
+                        idx_membresia,
+                        bp_service[0],
+                        idx_bp,
+                        id_user,
+                    ),
+                )
+            )
 
-    return encontrados, ambiguos, nao_encontrados
+    return encontrados, ambiguos, criacoes
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--aplicar", action="store_true", help="Marca TRUE na coluna BP SERVICE da Membresia.")
+    parser.add_argument("--aplicar", action="store_true", help="Cria/valida BP SERVICE e marca TRUE na Membresia.")
     args = parser.parse_args()
 
     settings = load_settings()
-    guard = SpreadsheetGuard(settings, writable_original_titles={SHEET_MEMBRESIA} if args.aplicar else set())
+    guard = SpreadsheetGuard(settings, writable_original_titles={SHEET_MEMBRESIA, SHEET_BP_SERVICE} if args.aplicar else set())
     membresia = guard.read_worksheet(SHEET_MEMBRESIA)
     bp_service = guard.read_worksheet(SHEET_BP_SERVICE)
 
-    encontrados, ambiguos, nao_encontrados = calcular_matches(membresia, bp_service)
+    encontrados, ambiguos, criacoes = calcular_matches(membresia, bp_service)
     idx_membresia = map_headers(membresia[0])
     col_flag = idx_membresia[ColMembresia.FLAG_BP_SERVICE] + 1
 
     print("###############################################################################")
-    print("[MEMBRESIA-BP] VALIDACAO DE EXISTENTES")
+    print("[MEMBRESIA-BP] SINCRONIZACAO MEMBRESIA -> BP SERVICE")
     print(f"Modo: {'APLICAR' if args.aplicar else 'DRY-RUN'}")
     print(f"Encontrados inequivocos: {len(encontrados)}")
+    print(f"Criacoes previstas: {len(criacoes)}")
     print(f"Ambiguos: {len(ambiguos)}")
-    print(f"Nao encontrados: {len(nao_encontrados)}")
     print("###############################################################################")
 
     print("\nENCONTRADOS INEQUIVOCOS")
     for item in encontrados:
-        print(f"Linha={item.linha_membresia} Nome={item.nome!r} ID_USER={item.id_user} Metodo={item.metodo}")
+        print(f"Linha={item.linha_membresia} Nome={item.nome!r} ID_USER={item.id_user} Metodo={item.metodo} Nome BP={item.nome_bp!r}")
 
     print("\nAMBIGUOS")
     for item in ambiguos:
         print(f"Linha={item.linha_membresia} Nome={item.nome!r} Motivo={item.motivo} IDs={', '.join(item.ids_possiveis)}")
 
-    print("\nNAO ENCONTRADOS")
-    for item in nao_encontrados:
-        print(f"Linha={item.linha} Nome={item.nome_original!r}")
+    print("\nCRIAR EM BP SERVICE")
+    for item in criacoes:
+        print(f"Linha={item.identidade.linha} Nome={item.identidade.nome_original!r} Novo ID_USER={item.id_user}")
 
-    if args.aplicar and encontrados:
+    if args.aplicar:
+        if criacoes:
+            guard.append_rows(SHEET_BP_SERVICE, [item.row for item in criacoes])
+            print(f"\nCriadas {len(criacoes)} linhas em BP SERVICE.")
         updates = [(item.linha_membresia, col_flag, "TRUE") for item in encontrados]
-        guard.batch_update_cells(SHEET_MEMBRESIA, updates)
-        print(f"\nAtualizadas {len(updates)} linhas em Membresia.BP SERVICE.")
+        updates.extend((item.identidade.linha, col_flag, "TRUE") for item in criacoes)
+        if updates:
+            guard.batch_update_cells(SHEET_MEMBRESIA, updates)
+            print(f"Atualizadas {len(updates)} linhas em Membresia.BP SERVICE.")
+        else:
+            print("\nNenhuma alteracao para aplicar.")
     elif not args.aplicar:
         print("\nDry-run: nenhuma sheet foi alterada.")
 

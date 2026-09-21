@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,12 @@ class Etapa:
     nome: str
     script: str
     aplica: bool = False
+
+
+@dataclass(frozen=True)
+class ResultadoEtapa:
+    nome: str
+    duracao_segundos: float
 
 
 ETAPAS = [
@@ -62,7 +69,12 @@ ETAPAS = [
 ]
 
 
-def run_etapa(etapa: Etapa, aplicar: bool) -> None:
+def format_duration(seconds: float) -> str:
+    minutes, remaining = divmod(seconds, 60)
+    return f"{int(minutes):02d}:{remaining:05.2f}"
+
+
+def run_etapa(etapa: Etapa, aplicar: bool) -> ResultadoEtapa:
     cmd = [sys.executable, str(BASE_DIR / etapa.script)]
     if aplicar and etapa.aplica:
         cmd.append("--aplicar")
@@ -73,7 +85,11 @@ def run_etapa(etapa: Etapa, aplicar: bool) -> None:
     print("Comando:", " ".join(cmd), flush=True)
     print("=" * 79, flush=True)
 
+    started_at = time.perf_counter()
     subprocess.run(cmd, check=True)
+    elapsed = time.perf_counter() - started_at
+    print(f"\n[DURACAO] {etapa.nome}: {format_duration(elapsed)}", flush=True)
+    return ResultadoEtapa(nome=etapa.nome, duracao_segundos=elapsed)
 
 
 def main() -> None:
@@ -90,9 +106,19 @@ def main() -> None:
     print(f"Modo: {'APLICAR' if args.aplicar else 'DRY-RUN'}", flush=True)
     print("###############################################################################", flush=True)
 
+    resultados = []
+    started_at = time.perf_counter()
     for etapa in ETAPAS:
-        run_etapa(etapa, args.aplicar)
+        resultados.append(run_etapa(etapa, args.aplicar))
+    total_elapsed = time.perf_counter() - started_at
 
+    print("", flush=True)
+    print("###############################################################################", flush=True)
+    print("[COLABORADOR] TEMPOS", flush=True)
+    for resultado in resultados:
+        print(f"{resultado.nome}: {format_duration(resultado.duracao_segundos)}", flush=True)
+    print(f"Total: {format_duration(total_elapsed)}", flush=True)
+    print("###############################################################################", flush=True)
     print("", flush=True)
     print("###############################################################################", flush=True)
     print("[COLABORADOR] COCKPIT CONCLUIDO", flush=True)

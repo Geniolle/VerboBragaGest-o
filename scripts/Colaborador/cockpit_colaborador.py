@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-ETAPA_TIMEOUT_SECONDS = 180
+ETAPA_TIMEOUT_SECONDS = 1800
 
 
 @dataclass(frozen=True)

@@ -43,6 +43,15 @@ processos Python operacionais: `systemd`, usuário `opc`, diretório de trabalho
 do projeto e `uv` global reutilizado. Não instale Windows Task Scheduler na
 máquina local para este processo.
 
+Referências de deploy do projeto:
+
+- `../../../SERVER_PATH.md`
+- `../../../DEPLOYMENT.md`
+- `../../../PRODUCTION_RUNTIME.md`
+
+O padrão foi alinhado com a Tesouraria-SOMA, que documenta produção via
+`systemd` em `opc@servidor-tesouraria-v2`.
+
 Unidades versionadas:
 
 - `../../../scripts/Servidor/systemd/pastoreio-colaborador.service`

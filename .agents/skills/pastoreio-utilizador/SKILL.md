@@ -36,6 +36,41 @@ Para aplicar escritas controladas nos subprocessos que suportam `--aplicar`:
 uv run python scripts/Colaborador/cockpit_colaborador.py --aplicar
 ```
 
+## Execução produtiva no servidor
+
+O Colaborador produtivo deve correr no servidor, seguindo o padrão dos
+processos Python operacionais: `systemd`, usuário `opc`, diretório de trabalho
+do projeto e `uv` global reutilizado. Não instale Windows Task Scheduler na
+máquina local para este processo.
+
+Unidades versionadas:
+
+- `../../../scripts/Servidor/systemd/pastoreio-colaborador.service`
+- `../../../scripts/Servidor/systemd/pastoreio-colaborador.timer`
+
+O timer chama o runner:
+
+```text
+uv --cache-dir /home/opc/pastoreio-orquestrador/.uv-cache run python scripts/Servidor/executar_colaborador_agendado.py --aplicar
+```
+
+O runner mantém lock em `runtime/colaborador.lock`, grava somente o último log
+consolidado em `runtime/colaborador_ultimo.log` e ignora execuções
+concorrentes. Para instalar no servidor:
+
+```text
+sudo scripts/Servidor/instalar_timer_colaborador_systemd.sh
+```
+
+Verificações úteis no servidor:
+
+```text
+systemctl list-timers pastoreio-colaborador.timer
+systemctl status pastoreio-colaborador.timer
+systemctl status pastoreio-colaborador.service
+journalctl -u pastoreio-colaborador.service -n 100 --no-pager
+```
+
 ## Subprocesso: Criar no utilizador Membresia
 
 Implementação versionada em

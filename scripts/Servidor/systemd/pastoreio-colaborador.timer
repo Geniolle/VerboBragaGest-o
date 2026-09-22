@@ -1,0 +1,13 @@
+[Unit]
+Description=Pastoreio - agenda do Cockpit Colaborador
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=pastoreio-colaborador.service
+
+[Install]
+WantedBy=timers.target
+

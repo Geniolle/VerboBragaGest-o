@@ -62,6 +62,11 @@ ETAPAS = [
         "reconciliar_cadeia_departamentos.py",
         aplica=True,
     ),
+    Etapa(
+        "7. Sincronizar BP AUTORITY -> BP ALGORITIMO (ativação completa)",
+        "sincronizar_bp_autority_bp_algoritimo.py",
+        aplica=True,
+    ),
 ]
 
 

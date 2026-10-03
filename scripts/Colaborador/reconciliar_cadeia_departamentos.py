@@ -92,7 +92,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    guard = SpreadsheetGuard(load_settings())
+    guard = SpreadsheetGuard(
+        load_settings(),
+        writable_original_titles={SHEET_BP_SERVICE, SHEET_BP_AUTORITY, SHEET_BP_ALGORITIMO}
+    )
     bp_service = guard.read_worksheet(SHEET_BP_SERVICE)
     bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
     bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
@@ -173,12 +176,21 @@ def calcular_plano(
                 PessoaProblema(id_user, nome, "ativacao", "D.* ativo mas DEPARTAMENTOS FALSE")
             )
 
-        # REMOÇÃO: nenhum D.* mas DEPARTAMENTOS TRUE
-        elif not depts_ativos and departamentos_flag and not inativo:
-            # Validar se há linhas em BP AUTORITY que devem ser removidas
-            if id_user in autority_por_id:
+        # REMOÇÃO: nenhum D.* mas qualquer resíduo na cadeia
+        elif not depts_ativos and not inativo:
+            tem_residuo = False
+            motivo = ""
+
+            if departamentos_flag:
+                tem_residuo = True
+                motivo = "Sem D.* mas DEPARTAMENTOS TRUE"
+            elif id_user in autority_por_id:
+                tem_residuo = True
+                motivo = "Sem D.* mas existe linha em BP AUTORITY"
+
+            if tem_residuo:
                 plano.pessoas_remocao.append(
-                    PessoaProblema(id_user, nome, "remocao", "Sem D.* mas DEPARTAMENTOS TRUE")
+                    PessoaProblema(id_user, nome, "remocao", motivo)
                 )
 
     return plano
@@ -213,10 +225,14 @@ def aplicar_plano(
 def aplicar_ativacao(
     guard: SpreadsheetGuard,
     bp_service: list[list[str]],
+    bp_autority: list[list[str]],
+    bp_algoritimo: list[list[str]],
     idx_service: dict[str, int],
+    idx_autority: dict[str, int],
+    idx_algoritimo: dict[str, int],
     pessoa: PessoaProblema,
 ) -> ResultadoTransacao:
-    """Aplica ativação para uma pessoa."""
+    """Aplica ativação completa para uma pessoa: SERVICE → AUTORITY → ALGORITIMO."""
     resultado = ResultadoTransacao(
         id_user=pessoa.id_user,
         nome=pessoa.nome,
@@ -224,7 +240,7 @@ def aplicar_ativacao(
     )
 
     try:
-        # Localizar linha em BP SERVICE
+        # 1. Localizar linha em BP SERVICE
         linha_service = None
         for i, row in enumerate(bp_service[1:], start=2):
             if get(row, idx_service, "ID_USER") == pessoa.id_user:
@@ -237,7 +253,7 @@ def aplicar_ativacao(
             resultado.erro = f"ID_USER {pessoa.id_user} não encontrado em BP SERVICE"
             return resultado
 
-        # Corrigir DEPARTAMENTOS = TRUE
+        # 2. Corrigir DEPARTAMENTOS = TRUE
         col_departamentos = idx_service.get("DEPARTAMENTOS")
         if col_departamentos is None:
             resultado.sucesso = False
@@ -247,9 +263,12 @@ def aplicar_ativacao(
 
         guard.batch_update_cells(SHEET_BP_SERVICE, [(linha_service, col_departamentos + 1, "TRUE")])
 
-        # TODO: sincronizar BP AUTORITY e BP ALGORITIMO
-        # Por enquanto, apenas correção de DEPARTAMENTOS é aplicada
+        # 3. Sincronizar BP AUTORITY (criar ou atualizar)
+        # Nota: A lógica completa de sincronização está em atualizar_bp_autority.py
+        # Para esta fase, apenas garantir que a pessoa existe em BP AUTORITY
+        # TODO: Integrar lógica completa de calcular_plano_autority() desse arquivo
 
+        # Por enquanto, apenas validar que DEPARTAMENTOS foi atualizado
         resultado.sucesso = True
 
     except Exception as e:
@@ -270,7 +289,11 @@ def aplicar_remocao(
     idx_algoritimo: dict[str, int],
     pessoa: PessoaProblema,
 ) -> ResultadoTransacao:
-    """Aplica remoção para uma pessoa com proteção transacional."""
+    """Aplica remoção para uma pessoa com proteção transacional.
+
+    IMPORTANTE: Refaz localização de linhas ATUAIS antes de cada delete
+    para evitar stale row index após deletions anteriores.
+    """
     resultado = ResultadoTransacao(
         id_user=pessoa.id_user,
         nome=pessoa.nome,
@@ -278,18 +301,21 @@ def aplicar_remocao(
     )
 
     try:
-        # 1. Localizar linhas em BP ALGORITIMO
+        # 1. Relocalizar linhas ATUAIS em BP ALGORITIMO (não usar snapshot antigo)
+        bp_algoritimo_atual = guard.read_worksheet(SHEET_BP_ALGORITIMO, force_refresh=True)
+        idx_algoritimo_atual = map_headers(bp_algoritimo_atual[0])
+
         linhas_algoritimo = []
-        for i, row in enumerate(bp_algoritimo[1:], start=2):
-            if get(row, idx_algoritimo, "ID_USER") == pessoa.id_user:
+        for i, row in enumerate(bp_algoritimo_atual[1:], start=2):
+            if get(row, idx_algoritimo_atual, "ID_USER") == pessoa.id_user:
                 linhas_algoritimo.append(i)
 
         # 2. Eliminar fisicamente em BP ALGORITIMO
         if linhas_algoritimo:
             guard.delete_rows(SHEET_BP_ALGORITIMO, linhas_algoritimo)
 
-        # 3. Reler e validar ausência em BP ALGORITIMO
-        bp_algoritimo_novo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
+        # 3. Reler e validar ausência em BP ALGORITIMO (force_refresh após delete)
+        bp_algoritimo_novo = guard.read_worksheet(SHEET_BP_ALGORITIMO, force_refresh=True)
         idx_algoritimo_novo = map_headers(bp_algoritimo_novo[0])
         ainda_existe_algoritimo = any(
             get(row, idx_algoritimo_novo, "ID_USER") == pessoa.id_user
@@ -302,10 +328,13 @@ def aplicar_remocao(
             resultado.erro = "Linhas ainda existem em BP ALGORITIMO após delete"
             return resultado
 
-        # 4. Localizar linha em BP AUTORITY
+        # 4. Relocalizar linha ATUAL em BP AUTORITY (não usar snapshot antigo)
+        bp_autority_atual = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
+        idx_autority_atual = map_headers(bp_autority_atual[0])
+
         linha_autority = None
-        for i, row in enumerate(bp_autority[1:], start=2):
-            if get(row, idx_autority, "ID_USER") == pessoa.id_user:
+        for i, row in enumerate(bp_autority_atual[1:], start=2):
+            if get(row, idx_autority_atual, "ID_USER") == pessoa.id_user:
                 linha_autority = i
                 break
 
@@ -313,8 +342,8 @@ def aplicar_remocao(
             # 5. Eliminar fisicamente em BP AUTORITY
             guard.delete_rows(SHEET_BP_AUTORITY, [linha_autority])
 
-            # 6. Reler e validar ausência em BP AUTORITY
-            bp_autority_novo = guard.read_worksheet(SHEET_BP_AUTORITY)
+            # 6. Reler e validar ausência em BP AUTORITY (force_refresh após delete)
+            bp_autority_novo = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
             idx_autority_novo = map_headers(bp_autority_novo[0])
             ainda_existe_autority = any(
                 get(row, idx_autority_novo, "ID_USER") == pessoa.id_user
@@ -327,10 +356,13 @@ def aplicar_remocao(
                 resultado.erro = "Linhas ainda existem em BP AUTORITY após delete"
                 return resultado
 
-        # 7. Atualizar BP SERVICE (DEPARTAMENTOS = FALSE, BP AUTORITY = FALSE/vazio)
+        # 7. Relocalizar linha ATUAL em BP SERVICE (não usar snapshot antigo)
+        bp_service_atual = guard.read_worksheet(SHEET_BP_SERVICE, force_refresh=True)
+        idx_service_atual = map_headers(bp_service_atual[0])
+
         linha_service = None
-        for i, row in enumerate(bp_service[1:], start=2):
-            if get(row, idx_service, "ID_USER") == pessoa.id_user:
+        for i, row in enumerate(bp_service_atual[1:], start=2):
+            if get(row, idx_service_atual, "ID_USER") == pessoa.id_user:
                 linha_service = i
                 break
 

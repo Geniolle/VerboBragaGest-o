@@ -32,6 +32,7 @@ class ColMembresia:
     FREGUESIA = "Freguesia"
     DISCIPULADO = "Discipulado Verbo da Vida"
     FLAG_BP_SERVICE = "BP SERVICE"
+    TIMESTAMP = "TIMESTAMP"
 
 
 class ColBpService:
@@ -413,6 +414,7 @@ def calcular_matches(
             ColMembresia.FREGUESIA,
             ColMembresia.DISCIPULADO,
             ColMembresia.FLAG_BP_SERVICE,
+            ColMembresia.TIMESTAMP,
         ),
         SHEET_MEMBRESIA,
     )
@@ -552,6 +554,9 @@ def main() -> None:
         print(f"Linha={item.identidade.linha} Nome={item.identidade.nome_original!r} Novo ID_USER={item.id_user}")
 
     if args.aplicar:
+        from datetime import datetime
+
+        timestamp_agora = datetime.now().isoformat()
         criacoes_validadas = criacoes
         criacoes_falhadas: list[Criacao] = []
         if criacoes:
@@ -571,11 +576,28 @@ def main() -> None:
                         f"Nome={item.identidade.nome_original!r} "
                         f"ID_USER={item.id_user}"
                     )
-        updates = [(item.linha_membresia, col_flag, "TRUE") for item in encontrados]
-        updates.extend((item.identidade.linha, col_flag, "TRUE") for item in criacoes_validadas)
+
+        # Atualiza BP SERVICE flag e TIMESTAMP
+        col_timestamp = idx_membresia[ColMembresia.TIMESTAMP] + 1
+        updates = [
+            (item.linha_membresia, col_flag, "TRUE", item.linha_membresia, col_timestamp, timestamp_agora)
+            for item in encontrados
+        ]
+        updates.extend(
+            (item.identidade.linha, col_flag, "TRUE", item.identidade.linha, col_timestamp, timestamp_agora)
+            for item in criacoes_validadas
+        )
+
         if updates:
-            guard.batch_update_cells(SHEET_MEMBRESIA, updates)
-            print(f"Atualizadas {len(updates)} linhas em Membresia.BP SERVICE.")
+            # Batch update com duas colunas por linha
+            batch_updates = []
+            for update in updates:
+                linha, col_bp, val_bp, linha2, col_ts, val_ts = update
+                batch_updates.append((linha, col_bp, val_bp))
+                batch_updates.append((linha2, col_ts, val_ts))
+
+            guard.batch_update_cells(SHEET_MEMBRESIA, batch_updates)
+            print(f"Atualizadas {len(updates)} linhas em Membresia (BP SERVICE=TRUE e TIMESTAMP={timestamp_agora}).")
         else:
             print("\nNenhuma alteracao para aplicar.")
     elif not args.aplicar:

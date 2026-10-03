@@ -491,15 +491,15 @@ def test_regressao_teste_servidor():
 
 
 def test_format_phone_com_prefixo():
-    """Telefone com prefixo (+) é mantido tal como está."""
-    assert format_phone_for_bp_service("+351912345678") == "+351912345678"
-    assert format_phone_for_bp_service("+351 912 345 678") == "+351912345678"
+    """Telefone com prefixo (+) é formatado com apóstrofo escape e (+)."""
+    assert format_phone_for_bp_service("+351912345678") == "'+351912345678"
+    assert format_phone_for_bp_service("+351 912 345 678") == "'+351912345678"
 
 
 def test_format_phone_sem_prefixo():
-    """Telefone sem prefixo (+) tem um adicionado automaticamente."""
-    assert format_phone_for_bp_service("351912345678") == "+351912345678"
-    assert format_phone_for_bp_service("351 912 345 678") == "+351912345678"
+    """Telefone sem prefixo (+) tem um adicionado com apóstrofo escape."""
+    assert format_phone_for_bp_service("351912345678") == "'+351912345678"
+    assert format_phone_for_bp_service("351 912 345 678") == "'+351912345678"
 
 
 def test_format_phone_vazio():

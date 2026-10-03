@@ -169,7 +169,8 @@ def normalize_phone(valor: object) -> str:
 def format_phone_for_bp_service(valor: object) -> str:
     """Formata telefone para BP SERVICE: garante que começa com (+).
 
-    Remove espaços extras e garante formato +XXXXXXXXXXXXX.
+    Remove espaços extras, garante formato +XXXXXXXXXXXXX e prefixo com '
+    para evitar que Google Sheets interprete como fórmula/número.
     """
     if valor is None:
         return ""
@@ -180,8 +181,9 @@ def format_phone_for_bp_service(valor: object) -> str:
     numeros = re.sub(r"\D+", "", texto)
     if not numeros:
         return ""
-    # Reconstrói com + no início
-    return f"+{numeros}"
+    # Reconstrói com + no início e prefixo com apóstrofo para escapar da interpretação do Sheets
+    # O apóstrofo é invisível na visualização, mas força o Sheets a tratar como texto
+    return f"'+{numeros}"
 
 
 def normalize_date(valor: object) -> str:

@@ -68,6 +68,16 @@ class PessoaBp:
     def nome_nascimento(self) -> str:
         return f"{self.nome}|{self.nascimento}" if self.nome and self.nascimento else ""
 
+    @property
+    def chave_identidade_tripla(self) -> tuple[str, str, str] | None:
+        """Chave de identidade obrigatória: NOME + EMAIL + TELEFONE.
+
+        Retorna None se algum dos campos está vazio (dados insuficientes para match automático).
+        """
+        if not self.nome or not self.email or not self.telefone:
+            return None
+        return (self.nome, self.email, self.telefone)
+
 
 @dataclass(frozen=True)
 class IdentidadeMembresia:
@@ -86,6 +96,16 @@ class IdentidadeMembresia:
     @property
     def nome_nascimento(self) -> str:
         return f"{self.nome}|{self.nascimento}" if self.nome and self.nascimento else ""
+
+    @property
+    def chave_identidade_tripla(self) -> tuple[str, str, str] | None:
+        """Chave de identidade obrigatória: NOME + EMAIL + TELEFONE.
+
+        Retorna None se algum dos campos está vazio (dados insuficientes para match automático).
+        """
+        if not self.nome or not self.email or not self.telefone:
+            return None
+        return (self.nome, self.email, self.telefone)
 
 
 @dataclass(frozen=True)
@@ -171,7 +191,15 @@ def parse_whatsapp(valor: object) -> bool | None:
     return None
 
 
-def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaBp]], dict[str, list[PessoaBp]], dict[str, list[PessoaBp]]]:
+def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[tuple[str, str, str], PessoaBp], dict[str, list[PessoaBp]], dict[str, list[PessoaBp]], dict[str, list[PessoaBp]]]:
+    """Indexa BP SERVICE para matching.
+
+    Retorna:
+    - por_tripla: índice por (nome, email, telefone) - ÚNICO match automático
+    - por_email: auxiliar para diagnostico
+    - por_telefone: auxiliar para diagnostico
+    - por_nome_nascimento: auxiliar para diagnostico
+    """
     idx = map_headers(valores[0])
     validar_colunas(
         idx,
@@ -187,6 +215,7 @@ def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaB
         ),
         SHEET_BP_SERVICE,
     )
+    por_tripla: dict[tuple[str, str, str], PessoaBp] = {}
     por_email: dict[str, list[PessoaBp]] = {}
     por_telefone: dict[str, list[PessoaBp]] = {}
     por_nome_nascimento: dict[str, list[PessoaBp]] = {}
@@ -203,6 +232,8 @@ def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaB
             number_whatsapp=normalize_phone(get(row, idx, ColBpService.NUMBER_WHATSAPP)),
             nascimento=normalize_date(get(row, idx, ColBpService.DATA_NASCIMENTO)),
         )
+        if pessoa.chave_identidade_tripla:
+            por_tripla[pessoa.chave_identidade_tripla] = pessoa
         if pessoa.email:
             por_email.setdefault(pessoa.email, []).append(pessoa)
         for telefone in pessoa.telefones:
@@ -210,7 +241,7 @@ def indexar_bp_service(valores: list[list[str]]) -> tuple[dict[str, list[PessoaB
         if pessoa.nome_nascimento:
             por_nome_nascimento.setdefault(pessoa.nome_nascimento, []).append(pessoa)
 
-    return por_email, por_telefone, por_nome_nascimento
+    return por_tripla, por_email, por_telefone, por_nome_nascimento
 
 
 def identidade_membresia(linha: int, row: list[str], idx: dict[str, int]) -> IdentidadeMembresia:
@@ -237,98 +268,83 @@ def unicos(pessoas: list[PessoaBp]) -> list[PessoaBp]:
     return resultado
 
 
-def conflito_nome_data(pessoa: PessoaBp, identidade: IdentidadeMembresia) -> bool:
-    if identidade.nome_nascimento and pessoa.nome_nascimento:
-        return identidade.nome_nascimento != pessoa.nome_nascimento
-    if identidade.nome and pessoa.nome and identidade.nome != pessoa.nome and identidade.nascimento and pessoa.nascimento:
-        return True
-    return False
-
-
-def resolver_multiplos_por_desempate(candidatos: list[PessoaBp], identidade: IdentidadeMembresia, metodo_base: str) -> Match | Ambiguidade:
-    candidatos = unicos(candidatos)
-    if len(candidatos) == 1:
-        pessoa = candidatos[0]
-        if metodo_base.startswith("TELEFONE") and conflito_nome_data(pessoa, identidade):
-            return Ambiguidade(
-                identidade.linha,
-                identidade.nome_original,
-                "TELEFONE encontrou um registo, mas nome/data conflitam",
-                (pessoa.id_user,) if pessoa.id_user else (),
-            )
-        return Match(identidade.linha, identidade.nome_original, pessoa.id_user, metodo_base, pessoa.nome)
-
-    for telefone, sufixo in (
-        (identidade.telefone, "TELEFONE"),
-        (identidade.number_whatsapp, "NUMBER_WHATSAPP"),
-    ):
-        if not telefone:
-            continue
-        filtrados = [p for p in candidatos if telefone in p.telefones]
-        if len(filtrados) == 1:
-            pessoa = filtrados[0]
-            if metodo_base.startswith("TELEFONE") and conflito_nome_data(pessoa, identidade):
-                continue
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+{sufixo}", pessoa.nome)
-
-    if identidade.nome_nascimento:
-        filtrados = [p for p in candidatos if p.nome_nascimento == identidade.nome_nascimento]
-        if len(filtrados) == 1:
-            pessoa = filtrados[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, f"{metodo_base}+NOME+DATA_NASCIMENTO", pessoa.nome)
-
-    return Ambiguidade(
-        identidade.linha,
-        identidade.nome_original,
-        f"{metodo_base} encontrou multiplos registos sem desempate inequivoco",
-        tuple(p.id_user for p in candidatos if p.id_user),
-    )
-
-
 def encontrar_match(
     identidade: IdentidadeMembresia,
+    por_tripla: dict[tuple[str, str, str], PessoaBp],
     por_email: dict[str, list[PessoaBp]],
     por_telefone: dict[str, list[PessoaBp]],
     por_nome_nascimento: dict[str, list[PessoaBp]],
 ) -> Match | Ambiguidade | None:
-    if identidade.email:
-        candidatos = por_email.get(identidade.email, [])
-        if len(candidatos) == 1:
-            pessoa = candidatos[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "EMAIL", pessoa.nome)
-        if len(candidatos) > 1:
-            return resolver_multiplos_por_desempate(candidatos, identidade, "EMAIL")
+    """Procura match usando a nova regra: NOME + EMAIL + TELEFONE obrigatório.
 
-    candidatos_telefone: list[PessoaBp] = []
-    for telefone in identidade.telefones:
-        candidatos_telefone.extend(por_telefone.get(telefone, []))
-    candidatos_telefone = unicos(candidatos_telefone)
-    if len(candidatos_telefone) == 1:
-        pessoa = candidatos_telefone[0]
-        if not conflito_nome_data(pessoa, identidade):
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "TELEFONE", pessoa.nome)
-        return Ambiguidade(
-            identidade.linha,
-            identidade.nome_original,
-            "TELEFONE encontrou um registo, mas nome/data conflitam",
-            (pessoa.id_user,) if pessoa.id_user else (),
-        )
-    if len(candidatos_telefone) > 1:
-        return resolver_multiplos_por_desempate(candidatos_telefone, identidade, "TELEFONE")
+    Ordem:
+    1. Match automático: NOME + EMAIL + TELEFONE coincidem
+    2. Ambiguidade: alguns campos coincidem mas não todos os três
+    3. Novo utilizador: nenhum candidato plausível
+    """
 
-    if identidade.nome_nascimento:
-        candidatos_nome = por_nome_nascimento.get(identidade.nome_nascimento, [])
-        if len(candidatos_nome) == 1:
-            pessoa = candidatos_nome[0]
-            return Match(identidade.linha, identidade.nome_original, pessoa.id_user, "NOME+DATA_NASCIMENTO", pessoa.nome)
-        if len(candidatos_nome) > 1:
+    # 1. NOVO CRITÉRIO: Match automático por tripla (NOME + EMAIL + TELEFONE)
+    if identidade.chave_identidade_tripla:
+        pessoa = por_tripla.get(identidade.chave_identidade_tripla)
+        if pessoa:
+            return Match(
+                identidade.linha,
+                identidade.nome_original,
+                pessoa.id_user,
+                "NOME+EMAIL+TELEFONE",
+                pessoa.nome
+            )
+
+    # 2. DIAGNÓSTICO: Procura ambiguidades parciais
+    # Se alguns campos coincidem mas não todos os três, é AMBIGUIDADE
+
+    # Verifica email + telefone iguais mas nome diferente
+    if identidade.email and identidade.telefone:
+        candidatos_por_email = por_email.get(identidade.email, [])
+        candidatos_por_telefone_list: list[PessoaBp] = []
+        for telefone in identidade.telefones:
+            candidatos_por_telefone_list.extend(por_telefone.get(telefone, []))
+        candidatos_por_telefone = unicos(candidatos_por_telefone_list)
+
+        candidatos_email_e_telefone = [p for p in candidatos_por_email if p in candidatos_por_telefone]
+        if candidatos_email_e_telefone:
             return Ambiguidade(
                 identidade.linha,
                 identidade.nome_original,
-                "NOME+DATA_NASCIMENTO encontrou multiplos registos",
-                tuple(p.id_user for p in candidatos_nome if p.id_user),
+                "Email e telefone coincidem, mas nome é diferente",
+                tuple(p.id_user for p in candidatos_email_e_telefone if p.id_user),
             )
 
+    # Verifica email e nome iguais mas telefone diferente
+    if identidade.email and identidade.nome:
+        candidatos_por_email = por_email.get(identidade.email, [])
+        candidatos_nome_igual = [p for p in candidatos_por_email if p.nome == identidade.nome]
+        if candidatos_nome_igual:
+            # Encontrou email+nome iguais, então telefone é diferente
+            return Ambiguidade(
+                identidade.linha,
+                identidade.nome_original,
+                "Nome e email coincidem, mas telefone é diferente",
+                tuple(p.id_user for p in candidatos_nome_igual if p.id_user),
+            )
+
+    # Verifica nome e telefone iguais mas email diferente
+    if identidade.nome and identidade.telefone:
+        candidatos_por_telefone_list: list[PessoaBp] = []
+        for telefone in identidade.telefones:
+            candidatos_por_telefone_list.extend(por_telefone.get(telefone, []))
+        candidatos_por_telefone = unicos(candidatos_por_telefone_list)
+        candidatos_nome_igual = [p for p in candidatos_por_telefone if p.nome == identidade.nome]
+        if candidatos_nome_igual:
+            # Encontrou nome+telefone iguais, então email é diferente
+            return Ambiguidade(
+                identidade.linha,
+                identidade.nome_original,
+                "Nome e telefone coincidem, mas email é diferente",
+                tuple(p.id_user for p in candidatos_nome_igual if p.id_user),
+            )
+
+    # 3. Novo utilizador: sem candidatos plausíveis
     return None
 
 
@@ -438,7 +454,7 @@ def calcular_matches(
         ),
         SHEET_BP_SERVICE,
     )
-    por_email, por_telefone, por_nome_nascimento = indexar_bp_service(bp_service)
+    por_tripla, por_email, por_telefone, por_nome_nascimento = indexar_bp_service(bp_service)
     existing_ids = collect_existing_numeric_ids(bp_service)
 
     encontrados: list[Match] = []
@@ -450,7 +466,7 @@ def calcular_matches(
         if is_true(flag) or flag:
             continue
         identidade = identidade_membresia(linha, row, idx_membresia)
-        resultado = encontrar_match(identidade, por_email, por_telefone, por_nome_nascimento)
+        resultado = encontrar_match(identidade, por_tripla, por_email, por_telefone, por_nome_nascimento)
         if isinstance(resultado, Match):
             encontrados.append(resultado)
         elif isinstance(resultado, Ambiguidade):

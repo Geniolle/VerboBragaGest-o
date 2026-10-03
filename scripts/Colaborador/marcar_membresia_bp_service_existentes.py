@@ -295,10 +295,8 @@ def encontrar_match(
                 pessoa.nome
             )
 
-    # 2. DIAGNÓSTICO: Procura ambiguidades parciais
-    # Se alguns campos coincidem mas não todos os três, é AMBIGUIDADE
-
-    # Verifica email + telefone iguais mas nome diferente
+    # 2. AMBIGUIDADE: ÚNICA condição automática
+    # Email + Telefone iguais (no MESMO registo) + Nome diferente
     if identidade.email and identidade.telefone:
         candidatos_por_email = por_email.get(identidade.email, [])
         candidatos_por_telefone_list: list[PessoaBp] = []
@@ -306,8 +304,11 @@ def encontrar_match(
             candidatos_por_telefone_list.extend(por_telefone.get(telefone, []))
         candidatos_por_telefone = unicos(candidatos_por_telefone_list)
 
+        # Encontra INTERSECÇÃO: registos que têm AMBOS email E telefone iguais
         candidatos_email_e_telefone = [p for p in candidatos_por_email if p in candidatos_por_telefone]
         if candidatos_email_e_telefone:
+            # Se o nome é diferente → AMBIGUIDADE
+            # (Se o nome fosse igual, já seria MATCH na seção anterior)
             return Ambiguidade(
                 identidade.linha,
                 identidade.nome_original,
@@ -315,36 +316,15 @@ def encontrar_match(
                 tuple(p.id_user for p in candidatos_email_e_telefone if p.id_user),
             )
 
-    # Verifica email e nome iguais mas telefone diferente
-    if identidade.email and identidade.nome:
-        candidatos_por_email = por_email.get(identidade.email, [])
-        candidatos_nome_igual = [p for p in candidatos_por_email if p.nome == identidade.nome]
-        if candidatos_nome_igual:
-            # Encontrou email+nome iguais, então telefone é diferente
-            return Ambiguidade(
-                identidade.linha,
-                identidade.nome_original,
-                "Nome e email coincidem, mas telefone é diferente",
-                tuple(p.id_user for p in candidatos_nome_igual if p.id_user),
-            )
-
-    # Verifica nome e telefone iguais mas email diferente
-    if identidade.nome and identidade.telefone:
-        candidatos_por_telefone_list: list[PessoaBp] = []
-        for telefone in identidade.telefones:
-            candidatos_por_telefone_list.extend(por_telefone.get(telefone, []))
-        candidatos_por_telefone = unicos(candidatos_por_telefone_list)
-        candidatos_nome_igual = [p for p in candidatos_por_telefone if p.nome == identidade.nome]
-        if candidatos_nome_igual:
-            # Encontrou nome+telefone iguais, então email é diferente
-            return Ambiguidade(
-                identidade.linha,
-                identidade.nome_original,
-                "Nome e telefone coincidem, mas email é diferente",
-                tuple(p.id_user for p in candidatos_nome_igual if p.id_user),
-            )
-
-    # 3. Novo utilizador: sem candidatos plausíveis
+    # 3. NOVO UTILIZADOR: nenhum cenário acima se aplicou
+    # Casos que caem aqui:
+    # - Email isolado
+    # - Telefone isolado
+    # - Nome isolado
+    # - Nome + Email iguais, Telefone diferente
+    # - Nome + Telefone iguais, Email diferente
+    # - Nenhum campo coincide
+    # - Dados insuficientes
     return None
 
 

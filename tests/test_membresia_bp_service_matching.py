@@ -163,8 +163,8 @@ def test_ambiguidade_email_telefone_iguais_nome_diferente():
     assert "nome é diferente" in resultado.motivo.lower()
 
 
-def test_ambiguidade_email_nome_iguais_telefone_diferente():
-    """Caso B: Email + Nome iguais, mas Telefone diferente → AMBIGUIDADE."""
+def test_novo_email_nome_iguais_telefone_diferente():
+    """Caso B: Email + Nome iguais, Telefone diferente → NOVO UTILIZADOR (NOT AMBIGUIDADE)."""
     por_tripla = {}
     por_email = {
         "joao@email.pt": [
@@ -192,13 +192,12 @@ def test_ambiguidade_email_nome_iguais_telefone_diferente():
 
     resultado = encontrar_match(identidade, por_tripla, por_email, {}, {})
 
-    assert isinstance(resultado, Ambiguidade)
-    assert "10" in resultado.ids_possiveis
-    assert "telefone é diferente" in resultado.motivo.lower()
+    # NÃO deve ser ambiguidade com a nova regra
+    assert resultado is None, "Nome+Email iguais com Telefone diferente deve ser NOVO UTILIZADOR"
 
 
-def test_ambiguidade_nome_telefone_iguais_email_diferente():
-    """Caso A.2: Nome + Telefone iguais, mas Email diferente → AMBIGUIDADE."""
+def test_novo_nome_telefone_iguais_email_diferente():
+    """Caso A.2: Nome + Telefone iguais, Email diferente → NOVO UTILIZADOR (NOT AMBIGUIDADE)."""
     por_tripla = {}
     por_telefone = {
         "351912345678": [
@@ -226,9 +225,8 @@ def test_ambiguidade_nome_telefone_iguais_email_diferente():
 
     resultado = encontrar_match(identidade, por_tripla, {}, por_telefone, {})
 
-    assert isinstance(resultado, Ambiguidade)
-    assert "10" in resultado.ids_possiveis
-    assert "email é diferente" in resultado.motivo.lower()
+    # NÃO deve ser ambiguidade com a nova regra
+    assert resultado is None, "Nome+Telefone iguais com Email diferente deve ser NOVO UTILIZADOR"
 
 
 def test_sem_match_email_isolado():

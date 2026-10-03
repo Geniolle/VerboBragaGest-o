@@ -58,13 +58,8 @@ ETAPAS = [
         aplica=True,
     ),
     Etapa(
-        "6. Reconciliar BP AUTORITY contra BP SERVICE",
-        "reconciliar_bp_autority.py",
-        aplica=True,
-    ),
-    Etapa(
-        "7. Sincronizar BP AUTORITY -> BP ALGORITIMO",
-        "sincronizar_bp_autority_bp_algoritimo.py",
+        "6. Reconciliar cadeia transacional: BP ALGORITIMO -> BP AUTORITY -> BP SERVICE",
+        "reconciliar_cadeia_departamentos.py",
         aplica=True,
     ),
 ]

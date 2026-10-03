@@ -192,16 +192,29 @@ def imprimir_plano(plano: PlanoBpColaborador, aplicar: bool) -> None:
 
 
 def aplicar_plano(guard: SpreadsheetGuard, bp_colaborador: list[list[str]], plano: PlanoBpColaborador) -> None:
-    max_rows = max(
-        [max(len(bp_colaborador) - 1, 0)] + [len(col.esperado) for col in plano.colunas]
-    )
+    """Aplicar somente delta: nunca reescrever célula igual."""
     updates: list[tuple[int, int, str]] = []
-    for col in plano.colunas:
-        for offset in range(max_rows):
-            value = col.esperado[offset] if offset < len(col.esperado) else ""
-            updates.append((offset + 2, col.col_index_1based, value))
 
-    guard.batch_update_cells(SHEET_BP_COLABORADOR, updates)
+    for col in plano.colunas:
+        # Apenas processar colunas com delta
+        if not col.em_falta and not col.a_mais:
+            continue  # ✅ Coluna já está consistente, zero escrita
+
+        # Calcular máximo de linhas necessárias para esta coluna
+        max_rows_col = max(len(col.atual), len(col.esperado))
+
+        for offset in range(max_rows_col):
+            valor_esperado = col.esperado[offset] if offset < len(col.esperado) else ""
+            valor_atual = col.atual[offset] if offset < len(col.atual) else ""
+
+            # Comparação com normalização
+            if normalize_text(valor_atual) != normalize_text(valor_esperado):
+                # ✅ Escrever apenas se mudou
+                updates.append((offset + 2, col.col_index_1based, valor_esperado))
+
+    # Escrever apenas se há delta real
+    if updates:
+        guard.batch_update_cells(SHEET_BP_COLABORADOR, updates)
 
 
 def main() -> None:

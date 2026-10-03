@@ -15,6 +15,7 @@ from scripts.Colaborador.marcar_membresia_bp_service_existentes import (
     normalize_email,
     normalize_phone,
     normalize_date,
+    format_phone_for_bp_service,
     encontrar_match,
 )
 
@@ -487,3 +488,22 @@ def test_regressao_teste_servidor():
     assert isinstance(resultado, Ambiguidade), "Teste Servidor deve ser classificado como AMBIGUIDADE"
     assert "17" in resultado.ids_possiveis
     assert "nome" in resultado.motivo.lower()
+
+
+def test_format_phone_com_prefixo():
+    """Telefone com prefixo (+) é mantido tal como está."""
+    assert format_phone_for_bp_service("+351912345678") == "+351912345678"
+    assert format_phone_for_bp_service("+351 912 345 678") == "+351912345678"
+
+
+def test_format_phone_sem_prefixo():
+    """Telefone sem prefixo (+) tem um adicionado automaticamente."""
+    assert format_phone_for_bp_service("351912345678") == "+351912345678"
+    assert format_phone_for_bp_service("351 912 345 678") == "+351912345678"
+
+
+def test_format_phone_vazio():
+    """Telefone vazio retorna string vazia."""
+    assert format_phone_for_bp_service("") == ""
+    assert format_phone_for_bp_service(None) == ""
+    assert format_phone_for_bp_service("   ") == ""

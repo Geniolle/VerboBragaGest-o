@@ -166,6 +166,24 @@ def normalize_phone(valor: object) -> str:
     return re.sub(r"\D+", "", "" if valor is None else str(valor))
 
 
+def format_phone_for_bp_service(valor: object) -> str:
+    """Formata telefone para BP SERVICE: garante que começa com (+).
+
+    Remove espaços extras e garante formato +XXXXXXXXXXXXX.
+    """
+    if valor is None:
+        return ""
+    texto = str(valor).strip()
+    if not texto:
+        return ""
+    # Remove todos os caracteres não-dígitos para extrair só números
+    numeros = re.sub(r"\D+", "", texto)
+    if not numeros:
+        return ""
+    # Reconstrói com + no início
+    return f"+{numeros}"
+
+
 def normalize_date(valor: object) -> str:
     texto = "" if valor is None else str(valor).strip()
     if not texto:
@@ -374,7 +392,7 @@ def build_new_bp_row(
 
     set_value(row, idx_bp, ColBpService.ID_USER, id_user)
     set_value(row, idx_bp, ColBpService.NOME, identidade.nome_original)
-    set_value(row, idx_bp, ColBpService.TELEFONE, get(membresia_row, idx_membresia, ColMembresia.TELEFONE))
+    set_value(row, idx_bp, ColBpService.TELEFONE, format_phone_for_bp_service(get(membresia_row, idx_membresia, ColMembresia.TELEFONE)))
     set_value(row, idx_bp, ColBpService.EMAIL, get(membresia_row, idx_membresia, ColMembresia.EMAIL))
     set_value(row, idx_bp, ColBpService.CODIGO_POSTAL, get(membresia_row, idx_membresia, ColMembresia.CODIGO_POSTAL))
     set_value(row, idx_bp, ColBpService.MORADA, get(membresia_row, idx_membresia, ColMembresia.MORADA))
@@ -390,7 +408,7 @@ def build_new_bp_row(
     if whatsapp is not None:
         set_value(row, idx_bp, ColBpService.WHATSAPP, whatsapp)
     if whatsapp is False:
-        set_value(row, idx_bp, ColBpService.NUMBER_WHATSAPP, get(membresia_row, idx_membresia, ColMembresia.NUMBER_WHATSAPP))
+        set_value(row, idx_bp, ColBpService.NUMBER_WHATSAPP, format_phone_for_bp_service(get(membresia_row, idx_membresia, ColMembresia.NUMBER_WHATSAPP)))
 
     return ["" if value is None else value for value in row]
 

@@ -48,22 +48,27 @@ ETAPAS = [
         "validar_flag_departamentos_bp_service.py",
     ),
     Etapa(
-        "4. Atualizar BP COLABORADOR a partir de BP SERVICE",
+        "4. Corrigir D.* = TRUE mas DEPARTAMENTOS = FALSE (ativação)",
+        "corrigir_departamentos_bp_service.py",
+        aplica=True,
+    ),
+    Etapa(
+        "5. Atualizar BP COLABORADOR a partir de BP SERVICE",
         "atualizar_bp_colaborador.py",
         aplica=True,
     ),
     Etapa(
-        "5. Atualizar BP AUTORITY a partir de BP SERVICE",
+        "6. Atualizar BP AUTORITY a partir de BP SERVICE",
         "atualizar_bp_autority.py",
         aplica=True,
     ),
     Etapa(
-        "6. Reconciliar BP AUTORITY contra BP SERVICE",
+        "7. Reconciliar BP AUTORITY contra BP SERVICE",
         "reconciliar_bp_autority.py",
         aplica=True,
     ),
     Etapa(
-        "7. Sincronizar BP AUTORITY -> BP ALGORITIMO",
+        "8. Sincronizar BP AUTORITY -> BP ALGORITIMO",
         "sincronizar_bp_autority_bp_algoritimo.py",
         aplica=True,
     ),

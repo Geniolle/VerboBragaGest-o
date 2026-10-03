@@ -101,7 +101,8 @@ def main() -> None:
     bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
 
     plano = calcular_plano(bp_service, bp_autority, bp_algoritimo)
-    imprimir_plano(plano)
+    modo = "APLICAR — ALTERAÇÕES REAIS SERÃO GRAVADAS" if args.aplicar else "DRY-RUN — NENHUMA ALTERAÇÃO SERÁ GRAVADA"
+    imprimir_plano(plano, modo)
 
     if args.aplicar:
         print("\n" + "=" * 79)
@@ -340,33 +341,33 @@ def aplicar_remocao(
             resultado.erro = "Linhas ainda existem em BP ALGORITIMO após delete"
             return resultado
 
-        # 4. Relocalizar linha ATUAL em BP AUTORITY (não usar snapshot antigo)
+        # 4. Relocalizar TODAS as linhas ATUAIS em BP AUTORITY (não usar snapshot antigo)
         bp_autority_atual = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
         idx_autority_atual = map_headers(bp_autority_atual[0])
 
-        linha_autority = None
+        linhas_autority = []
         for i, row in enumerate(bp_autority_atual[1:], start=2):
             if get(row, idx_autority_atual, "ID_USER") == pessoa.id_user:
-                linha_autority = i
-                break
+                linhas_autority.append(i)
 
-        if linha_autority:
-            # 5. Eliminar fisicamente em BP AUTORITY
-            guard.delete_rows(SHEET_BP_AUTORITY, [linha_autority])
+        if linhas_autority:
+            # 5. Eliminar TODAS as linhas fisicamente em BP AUTORITY (de baixo para cima)
+            guard.delete_rows(SHEET_BP_AUTORITY, linhas_autority)
 
-            # 6. Reler e validar ausência em BP AUTORITY (force_refresh após delete)
-            bp_autority_novo = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
-            idx_autority_novo = map_headers(bp_autority_novo[0])
-            ainda_existe_autority = any(
-                get(row, idx_autority_novo, "ID_USER") == pessoa.id_user
-                for row in bp_autority_novo[1:]
-            )
+        # 6. SEMPRE fazer force_refresh e validar ausência em BP AUTORITY
+        # (validação é INCONDICIONAL, mesmo que não houvesse linhas)
+        bp_autority_novo = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
+        idx_autority_novo = map_headers(bp_autority_novo[0])
+        ainda_existe_autority = any(
+            get(row, idx_autority_novo, "ID_USER") == pessoa.id_user
+            for row in bp_autority_novo[1:]
+        )
 
-            if ainda_existe_autority:
-                resultado.sucesso = False
-                resultado.etapa_falha = "validar_remocao_BP_AUTORITY"
-                resultado.erro = "Linhas ainda existem em BP AUTORITY após delete"
-                return resultado
+        if ainda_existe_autority:
+            resultado.sucesso = False
+            resultado.etapa_falha = "validar_remocao_BP_AUTORITY"
+            resultado.erro = "Linhas ainda existem em BP AUTORITY após delete"
+            return resultado
 
         # 7. Relocalizar linha ATUAL em BP SERVICE (não usar snapshot antigo)
         bp_service_atual = guard.read_worksheet(SHEET_BP_SERVICE, force_refresh=True)
@@ -401,10 +402,11 @@ def aplicar_remocao(
     return resultado
 
 
-def imprimir_plano(plano: PlanoReconciliacaoCadeia) -> None:
+def imprimir_plano(plano: PlanoReconciliacaoCadeia, modo: str = "DRY-RUN") -> None:
     """Imprime relatório do plano de reconciliação."""
     print("###############################################################################")
     print("[CADEIA DEPARTAMENTOS] RECONCILIAÇÃO TRANSACIONAL")
+    print(f"MODO: {modo}")
     print(f"Pessoas para ativar: {len(plano.pessoas_ativacao)}")
     print(f"Pessoas para remover: {len(plano.pessoas_remocao)}")
     print("###############################################################################")

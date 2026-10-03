@@ -167,6 +167,13 @@ class SpreadsheetGuard:
 
     def _check_rate_limit(self) -> None:
         """Verificar quota de leituras (60/minuto). Pausa se aproximar do limite."""
+        if not hasattr(self, 'read_timestamps'):
+            self.read_timestamps = deque()
+        if not hasattr(self, 'quota_threshold'):
+            self.quota_threshold = 50
+        if not hasattr(self, 'quota_limit_per_minute'):
+            self.quota_limit_per_minute = 60
+
         now = datetime.now()
         one_minute_ago = now - timedelta(minutes=1)
 

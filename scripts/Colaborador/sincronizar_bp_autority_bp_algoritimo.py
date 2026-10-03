@@ -83,7 +83,7 @@ class PlanoAuthorityAlgoritimo:
     inserir: list[VinculoAuthority] = field(default_factory=list)
     reativar: list[LinhaAlgoritimo] = field(default_factory=list)
     preencher_id_user: list[tuple[LinhaAlgoritimo, str]] = field(default_factory=list)
-    eliminar: list[LinhaAlgoritimo] = field(default_factory=list)
+    desativar: list[LinhaAlgoritimo] = field(default_factory=list)
     eliminar_duplicados: list[LinhaAlgoritimo] = field(default_factory=list)
     ignorados_sem_departamento_service: list[tuple[int, str, str]] = field(default_factory=list)
     ignorados_type_preenchido: list[tuple[int, str, str, str]] = field(default_factory=list)
@@ -303,7 +303,7 @@ def calcular_plano(
         alg_by_name.setdefault(linha.name_key, []).append(linha)
 
     reativar_keys: set[tuple[str, str]] = set()
-    eliminar_keys: set[tuple[str, str]] = set()
+    desativar_keys: set[tuple[str, str]] = set()
     update_id_lines: set[int] = set()
     duplicate_lines: set[int] = set()
 
@@ -357,9 +357,9 @@ def calcular_plano(
             continue
         if linha.dept_token not in managed_dept_tokens:
             continue
-        if linha.name_key not in valid_name_keys and linha.name_key not in eliminar_keys:
-            eliminar_keys.add(linha.name_key)
-            plano.eliminar.append(linha)
+        if linha.name_key not in valid_name_keys and linha.name_key not in desativar_keys:
+            desativar_keys.add(linha.name_key)
+            plano.desativar.append(linha)
 
     # Regra global: BP ALGORITIMO.ID_USER pertence ao cadastro mestre BP SERVICE.
     # Mesmo linhas inativas/legadas devem carregar o mesmo ID_USER quando o nome
@@ -400,7 +400,7 @@ def imprimir_plano(plano: PlanoAuthorityAlgoritimo, aplicar: bool) -> None:
     print(f"Vinculos a reativar: {len(plano.reativar)}")
     print(f"ID_USER a corrigir/preencher em vinculo existente: {len(plano.preencher_id_user)}")
     print(f"Vinculos duplicados ativos a eliminar: {len(plano.eliminar_duplicados)}")
-    print(f"Linhas BP ALGORITIMO a eliminar fisicamente por nao existirem em BP AUTORITY: {len(plano.eliminar)}")
+    print(f"Vinculos a desativar por nao existirem em BP AUTORITY: {len(plano.desativar)}")
     print(f"BP AUTORITY sem ID_USER ignorados: {plano.ignorados_sem_id}")
     print(f"BP AUTORITY sem BP SERVICE correspondente ignorados: {len(plano.ignorados_sem_bp_service)}")
     print(f"BP AUTORITY com ID_USER divergente do BP SERVICE: {len(plano.authority_id_divergente_service)}")
@@ -421,9 +421,9 @@ def imprimir_plano(plano: PlanoAuthorityAlgoritimo, aplicar: bool) -> None:
         print(f"Linha BP ALGORITIMO={l.linha} | ID_USER={l.id_user!r} | Nome={l.nome!r} | Departamento={l.departamento!r}")
 
     print("\nDESATIVAR")
-    if not plano.eliminar and not plano.eliminar_duplicados:
+    if not plano.desativar and not plano.eliminar_duplicados:
         print("(nenhum)")
-    for l in plano.eliminar:
+    for l in plano.desativar:
         print(f"Linha BP ALGORITIMO={l.linha} | ID_USER={l.id_user!r} | Nome={l.nome!r} | Departamento={l.departamento!r} | Motivo=nao existe em BP AUTORITY")
 
     print("\nELIMINAR DUPLICADOS")
@@ -470,15 +470,13 @@ def aplicar_plano(guard: SpreadsheetGuard, bp_algoritimo_header: list[str], plan
     col_id = idx[COL_ID_USER] + 1
 
     updates.extend((linha.linha, col_ativo, "TRUE") for linha in plano.reativar)
+    updates.extend((linha.linha, col_ativo, "FALSE") for linha in plano.desativar)
     updates.extend((linha.linha, col_id, id_user) for linha, id_user in plano.preencher_id_user)
 
     if updates:
         guard.batch_update_cells(SHEET_BP_ALGORITIMO, updates)
-
-    # Eliminar fisicamente as linhas que não têm departamento e duplicados
-    linhas_a_eliminar = [linha.linha for linha in plano.eliminar] + [linha.linha for linha in plano.eliminar_duplicados]
-    if linhas_a_eliminar:
-        guard.delete_rows(SHEET_BP_ALGORITIMO, linhas_a_eliminar)
+    if plano.eliminar_duplicados:
+        guard.delete_rows(SHEET_BP_ALGORITIMO, [linha.linha for linha in plano.eliminar_duplicados])
     if plano.inserir:
         guard.append_rows(SHEET_BP_ALGORITIMO, montar_linhas_insert(bp_algoritimo_header, plano.inserir))
 

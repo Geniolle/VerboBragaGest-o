@@ -176,19 +176,31 @@ def calcular_plano(
                 PessoaProblema(id_user, nome, "ativacao", "D.* ativo mas DEPARTAMENTOS FALSE")
             )
 
-        # REMOÇÃO: nenhum D.* mas qualquer resíduo na cadeia
+        # REMOÇÃO: nenhum D.* TRUE + qualquer resíduo derivado
+        # Resíduos incluem: DEPARTAMENTOS, BP AUTORITY flag, linhas em sheets
         elif not depts_ativos and not inativo:
-            tem_residuo = False
-            motivo = ""
+            # Detectar resíduos (qualquer indicação de vínculo ativo ainda existente)
+            tem_departamento_marcado = departamentos_flag
+            tem_bp_autority_flag = bool(get(row, idx_service, "BP AUTORITY"))
+            tem_linha_autority = id_user in autority_por_id
+            tem_linha_algoritimo = id_user in algoritimo_por_id
 
-            if departamentos_flag:
-                tem_residuo = True
-                motivo = "Sem D.* mas DEPARTAMENTOS TRUE"
-            elif id_user in autority_por_id:
-                tem_residuo = True
-                motivo = "Sem D.* mas existe linha em BP AUTORITY"
+            tem_residuo = tem_departamento_marcado or tem_bp_autority_flag or tem_linha_autority or tem_linha_algoritimo
 
             if tem_residuo:
+                # Construir motivo descritivo
+                motivos = []
+                if tem_departamento_marcado:
+                    motivos.append("DEPARTAMENTOS")
+                if tem_bp_autority_flag:
+                    motivos.append("BP AUTORITY flag")
+                if tem_linha_autority:
+                    motivos.append("BP AUTORITY linha")
+                if tem_linha_algoritimo:
+                    motivos.append("BP ALGORITIMO linha")
+
+                motivo = "Sem D.*, resíduo: " + " + ".join(motivos)
+
                 plano.pessoas_remocao.append(
                     PessoaProblema(id_user, nome, "remocao", motivo)
                 )

@@ -68,6 +68,11 @@ ETAPAS = [
         aplica=True,
     ),
     Etapa(
+        "7.5. Limpar BP ALGORITIMO de linhas obsoletas",
+        "limpar_bp_algoritimo.py",
+        aplica=True,
+    ),
+    Etapa(
         "8. Sincronizar BP AUTORITY -> ID_MANAGER (managers por departamento)",
         "sincronizar_id_manager.py",
         aplica=True,

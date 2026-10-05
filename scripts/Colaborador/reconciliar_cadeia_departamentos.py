@@ -177,9 +177,9 @@ def calcular_plano(
                 PessoaProblema(id_user, nome, "ativacao", "D.* ativo mas DEPARTAMENTOS FALSE")
             )
 
-        # REMOÇÃO: nenhum D.* TRUE + qualquer resíduo derivado
+        # REMOÇÃO: (nenhum D.* TRUE + qualquer resíduo) OU INATIVO=TRUE com resíduo
         # Resíduos incluem: DEPARTAMENTOS, BP AUTORITY flag, linhas em sheets
-        elif not depts_ativos and not inativo:
+        elif (not depts_ativos) or inativo:
             # Detectar resíduos (qualquer indicação de vínculo ativo ainda existente)
             tem_departamento_marcado = departamentos_flag
             tem_bp_autority_flag = bool(get(row, idx_service, "BP AUTORITY"))
@@ -191,6 +191,8 @@ def calcular_plano(
             if tem_residuo:
                 # Construir motivo descritivo
                 motivos = []
+                if inativo:
+                    motivos.append("INATIVO=TRUE")
                 if tem_departamento_marcado:
                     motivos.append("DEPARTAMENTOS")
                 if tem_bp_autority_flag:
@@ -200,7 +202,10 @@ def calcular_plano(
                 if tem_linha_algoritimo:
                     motivos.append("BP ALGORITIMO linha")
 
-                motivo = "Sem D.*, resíduo: " + " + ".join(motivos)
+                if inativo and not depts_ativos:
+                    motivo = "INATIVO=TRUE + resíduo: " + " + ".join(motivos)
+                else:
+                    motivo = "Sem D.*, resíduo: " + " + ".join(motivos)
 
                 plano.pessoas_remocao.append(
                     PessoaProblema(id_user, nome, "remocao", motivo)

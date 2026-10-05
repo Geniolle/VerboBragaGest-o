@@ -85,10 +85,12 @@ def format_duration(seconds: float) -> str:
     return f"{int(minutes):02d}:{remaining:05.2f}"
 
 
-def run_etapa(etapa: Etapa, aplicar: bool) -> ResultadoEtapa:
+def run_etapa(etapa: Etapa, aplicar: bool, no_cache: bool = False) -> ResultadoEtapa:
     cmd = [sys.executable, str(BASE_DIR / etapa.script)]
     if aplicar and etapa.aplica:
         cmd.append("--aplicar")
+    if not no_cache:
+        cmd.append("--use-cache")
 
     print("", flush=True)
     print("=" * 79, flush=True)
@@ -119,17 +121,37 @@ def main() -> None:
         action="store_true",
         help="Aplica escrita nos subprocessos que suportam --aplicar.",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Desativa cache de sheets (debug).",
+    )
     args = parser.parse_args()
 
     print("###############################################################################", flush=True)
     print("[COLABORADOR] COCKPIT", flush=True)
     print(f"Modo: {'APLICAR' if args.aplicar else 'DRY-RUN'}", flush=True)
+    print(f"Cache: {'DESATIVADO' if args.no_cache else 'ATIVADO'}", flush=True)
     print("###############################################################################", flush=True)
 
     resultados = []
     started_at = time.perf_counter()
-    for etapa in ETAPAS:
-        resultados.append(run_etapa(etapa, args.aplicar))
+    try:
+        for etapa in ETAPAS:
+            resultados.append(run_etapa(etapa, args.aplicar, args.no_cache))
+    finally:
+        # Limpar cache ao final
+        if not args.no_cache:
+            try:
+                import sys
+                sys.path.insert(0, str(BASE_DIR))
+                from sheets_cache import SheetsCache
+                SheetsCache.cleanup()
+                stats = SheetsCache.stats()
+                if stats["cached_sheets"] > 0:
+                    print(f"\n[CACHE STATS] {stats['cached_sheets']} sheets em cache ({stats['total_size_bytes']} bytes)", flush=True)
+            except Exception:
+                pass
     total_elapsed = time.perf_counter() - started_at
 
     print("", flush=True)

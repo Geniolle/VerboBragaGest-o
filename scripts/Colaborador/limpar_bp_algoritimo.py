@@ -172,14 +172,39 @@ def main() -> None:
         action="store_true",
         help="Remove linhas obsoletas de BP ALGORITIMO.",
     )
+    parser.add_argument(
+        "--use-cache",
+        action="store_true",
+        default=True,
+        help="Usar cache de sheets (padrão: True).",
+    )
     args = parser.parse_args()
 
+    # Usar cache se disponível
+    if args.use_cache:
+        try:
+            from sheets_cache import SheetsCache
+            cache = SheetsCache()
+            bp_algoritimo = cache.read(SHEET_BP_ALGORITIMO)
+            bp_autority = cache.read(SHEET_BP_AUTORITY)
+        except (ImportError, Exception):
+            # Fallback: ler direto se cache falhar
+            settings = load_settings()
+            writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
+            guard = SpreadsheetGuard(settings, writable_original_titles=writable)
+            bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
+            bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
+    else:
+        settings = load_settings()
+        writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
+        guard = SpreadsheetGuard(settings, writable_original_titles=writable)
+        bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
+        bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
+
+    # Sempre obter guard para escrita
     settings = load_settings()
     writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
     guard = SpreadsheetGuard(settings, writable_original_titles=writable)
-
-    bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
-    bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
 
     plano = calcular_plano(bp_algoritimo, bp_autority)
     imprimir_plano(plano, args.aplicar)

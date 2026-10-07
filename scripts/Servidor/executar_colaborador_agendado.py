@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pastoreio_orquestrador.ntfy_alertas import notificar_transicao
+from pastoreio_orquestrador.saude_colaborador import gravar_saude, ler_saude
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ RUNTIME_DIR = ROOT_DIR / "runtime"
 LOCK_FILE = RUNTIME_DIR / "colaborador.lock"
 LAST_LOG = RUNTIME_DIR / "colaborador_ultimo.log"
 NTFY_STATE_FILE = RUNTIME_DIR / "colaborador_ntfy_state.json"
+HEALTH_FILE = RUNTIME_DIR / "colaborador_health.json"
 COCKPIT = ROOT_DIR / "scripts" / "Colaborador" / "cockpit_colaborador.py"
 
 
@@ -135,6 +137,18 @@ def run_cockpit(aplicar: bool) -> int:
     )
     tmp_path = Path(tmp_name)
     started = time.perf_counter()
+    started_at = now_iso()
+    previous = ler_saude(HEALTH_FILE)
+    gravar_saude(
+        HEALTH_FILE,
+        state="RUNNING",
+        started_at=started_at,
+        finished_at=None,
+        exit_code=None,
+        current_stage="inicializacao",
+        last_error=None,
+        last_success_at=previous.get("last_success_at"),
+    )
 
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as log:
@@ -146,9 +160,12 @@ def run_cockpit(aplicar: bool) -> int:
             log.write("###############################################################################\n\n")
             log.flush()
 
+            child_env = os.environ.copy()
+            child_env["PASTOREIO_HEALTH_FILE"] = str(HEALTH_FILE)
             result = subprocess.run(
                 build_command(aplicar),
                 cwd=ROOT_DIR,
+                env=child_env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -165,6 +182,20 @@ def run_cockpit(aplicar: bool) -> int:
 
         os.replace(tmp_path, LAST_LOG)
         cleanup_temp_logs()
+        current = ler_saude(HEALTH_FILE)
+        finished_at = now_iso()
+        healthy = result.returncode == 0
+        gravar_saude(
+            HEALTH_FILE,
+            state="HEALTHY" if healthy else "FAILED",
+            finished_at=finished_at,
+            exit_code=result.returncode,
+            duration_seconds=round(time.perf_counter() - started, 2),
+            current_stage=None,
+            failed_stage=None if healthy else current.get("current_stage"),
+            last_error=None if healthy else f"Cockpit terminou com exit code {result.returncode}",
+            last_success_at=finished_at if healthy else current.get("last_success_at"),
+        )
         status_ntfy = notificar_transicao(
             exit_code=result.returncode,
             state_file=NTFY_STATE_FILE,

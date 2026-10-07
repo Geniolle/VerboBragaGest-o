@@ -9,15 +9,19 @@ Por padrao roda em dry-run sempre que o subprocesso suporta dry-run. Use
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from pastoreio_orquestrador.saude_colaborador import gravar_saude
+
 
 BASE_DIR = Path(__file__).resolve().parent
 ETAPA_TIMEOUT_SECONDS = 1800
+HEALTH_FILE = Path(os.environ["PASTOREIO_HEALTH_FILE"]) if os.environ.get("PASTOREIO_HEALTH_FILE") else None
 
 
 @dataclass(frozen=True)
@@ -77,7 +81,6 @@ ETAPAS = [
         "7.5. Limpar BP ALGORITIMO de linhas obsoletas",
         "limpar_bp_algoritimo.py",
         aplica=True,
-        usa_cache=True,
     ),
     Etapa(
         "8. Sincronizar BP AUTORITY -> ID_MANAGER (managers por departamento)",
@@ -93,6 +96,8 @@ def format_duration(seconds: float) -> str:
 
 
 def run_etapa(etapa: Etapa, aplicar: bool, no_cache: bool = False) -> ResultadoEtapa:
+    if HEALTH_FILE is not None:
+        gravar_saude(HEALTH_FILE, current_stage=etapa.nome)
     cmd = [sys.executable, str(BASE_DIR / etapa.script)]
     if aplicar and etapa.aplica:
         cmd.append("--aplicar")
@@ -117,6 +122,8 @@ def run_etapa(etapa: Etapa, aplicar: bool, no_cache: bool = False) -> ResultadoE
         )
         raise SystemExit(exc.timeout) from exc
     elapsed = time.perf_counter() - started_at
+    if HEALTH_FILE is not None:
+        gravar_saude(HEALTH_FILE, last_completed_stage=etapa.nome)
     print(f"\n[DURACAO] {etapa.nome}: {format_duration(elapsed)}", flush=True)
     return ResultadoEtapa(nome=etapa.nome, duracao_segundos=elapsed)
 

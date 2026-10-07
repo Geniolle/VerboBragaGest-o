@@ -1,0 +1,15 @@
+[Unit]
+Description=Pastoreio - Watchdog do Cockpit Colaborador
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=opc
+Group=opc
+WorkingDirectory=/home/opc/pastoreio-orquestrador
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/opc/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/opc/pastoreio-orquestrador/.env
+ExecStart=/usr/bin/env uv --cache-dir /home/opc/pastoreio-orquestrador/.uv-cache run python scripts/Servidor/verificar_saude_colaborador.py
+TimeoutStartSec=1min

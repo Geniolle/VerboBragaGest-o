@@ -13,6 +13,7 @@ Este script APENAS REMOVE (delta de eliminação), nunca reescreve.
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass, field
 
 from pastoreio_orquestrador.config import load_settings
@@ -175,6 +176,14 @@ def aplicar_plano(guard: SpreadsheetGuard, plano: PlanoLimpezaAlgoritimo) -> Non
     guard.delete_rows(SHEET_BP_ALGORITIMO, linhas_remover)
 
 
+def total_remocoes(plano: PlanoLimpezaAlgoritimo) -> int:
+    return len(set(
+        plano.remover_ativo_false
+        + plano.remover_sem_autority
+        + plano.remover_duplicados
+    ))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -185,41 +194,33 @@ def main() -> None:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        default=True,
-        help="Usar cache de sheets (padrão: True).",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--max-remocoes",
+        type=int,
+        default=int(os.environ.get("PASTOREIO_MAX_DELETE_BP_ALGORITIMO", "10")),
+        help="Limite de seguranca para remocoes numa execucao (padrao: 10).",
     )
     args = parser.parse_args()
 
-    # Usar cache se disponível
-    if args.use_cache:
-        try:
-            from sheets_cache import SheetsCache
-            cache = SheetsCache()
-            bp_algoritimo = cache.read(SHEET_BP_ALGORITIMO)
-            bp_autority = cache.read(SHEET_BP_AUTORITY)
-        except (ImportError, Exception):
-            # Fallback: ler direto se cache falhar
-            settings = load_settings()
-            writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
-            guard = SpreadsheetGuard(settings, writable_original_titles=writable)
-            bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
-            bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
-    else:
-        settings = load_settings()
-        writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
-        guard = SpreadsheetGuard(settings, writable_original_titles=writable)
-        bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO)
-        bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY)
-
-    # Sempre obter guard para escrita
+    # Etapa destrutiva: sempre usa leitura fresca, nunca cache compartilhado.
     settings = load_settings()
     writable = {SHEET_BP_ALGORITIMO} if args.aplicar else set()
     guard = SpreadsheetGuard(settings, writable_original_titles=writable)
+    bp_algoritimo = guard.read_worksheet(SHEET_BP_ALGORITIMO, force_refresh=True)
+    bp_autority = guard.read_worksheet(SHEET_BP_AUTORITY, force_refresh=True)
 
     plano = calcular_plano(bp_algoritimo, bp_autority)
     imprimir_plano(plano, args.aplicar)
 
     if args.aplicar:
+        total = total_remocoes(plano)
+        if total > args.max_remocoes:
+            raise RuntimeError(
+                f"Bloqueio de seguranca: {total} remocoes excedem o limite "
+                f"de {args.max_remocoes}. Revise o dry-run antes de aplicar."
+            )
         aplicar_plano(guard, plano)
 
 

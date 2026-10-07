@@ -15,14 +15,14 @@ def test_etapa_sem_suporte_nao_recebe_use_cache(run_mock):
 
 
 @patch("scripts.Colaborador.cockpit_colaborador.subprocess.run")
-def test_etapa_com_suporte_recebe_use_cache(run_mock):
-    etapa = Etapa("Limpar BP ALGORITIMO", "limpar_bp_algoritimo.py", aplica=True, usa_cache=True)
+def test_limpeza_destrutiva_nao_recebe_use_cache(run_mock):
+    etapa = Etapa("Limpar BP ALGORITIMO", "limpar_bp_algoritimo.py", aplica=True)
 
     run_etapa(etapa, aplicar=True, no_cache=False)
 
     cmd = run_mock.call_args.args[0]
     assert "--aplicar" in cmd
-    assert "--use-cache" in cmd
+    assert "--use-cache" not in cmd
 
 
 @patch("scripts.Colaborador.cockpit_colaborador.subprocess.run")

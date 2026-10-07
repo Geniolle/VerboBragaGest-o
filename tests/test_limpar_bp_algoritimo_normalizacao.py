@@ -1,4 +1,4 @@
-from scripts.Colaborador.limpar_bp_algoritimo import calcular_plano
+from scripts.Colaborador.limpar_bp_algoritimo import calcular_plano, total_remocoes
 
 
 def test_departamento_com_acento_corresponde_ao_vinculo_authority():
@@ -31,3 +31,4 @@ def test_remove_vinculo_realmente_ausente_da_authority():
     plano = calcular_plano(bp_algoritimo, bp_autority)
 
     assert plano.remover_sem_autority == [2]
+    assert total_remocoes(plano) == 1

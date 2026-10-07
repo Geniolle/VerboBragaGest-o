@@ -78,6 +78,18 @@ recuperação posterior, persistindo o estado em
 `runtime/colaborador_ntfy_state.json`; falhas repetidas não geram spam.
 `NTFY_TOKEN` é opcional e nunca deve ser versionado.
 
+O processo não mantém histórico de logs: `colaborador_ultimo.log` é sempre
+sobrescrito. A saúde atual também é um único snapshot sobrescrito em
+`runtime/colaborador_health.json`. O watchdog
+`pastoreio-colaborador-health.timer` alerta quando o timer principal está
+inativo, o snapshot está atrasado ou a última execução falhou. Um serviço
+`Type=oneshot` saudável fica `inactive` depois de terminar; o estado correto
+é determinado pelo snapshot, pelo resultado e pela atualidade da execução.
+
+A etapa destrutiva de limpeza de `BP ALGORITIMO` deve sempre reler as Sheets
+sem cache e bloquear aplicação quando o número de remoções exceder
+`PASTOREIO_MAX_DELETE_BP_ALGORITIMO`.
+
 Verificações úteis no servidor:
 
 ```text

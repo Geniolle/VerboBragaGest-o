@@ -17,6 +17,16 @@ from dataclasses import dataclass, field
 
 from pastoreio_orquestrador.config import load_settings
 from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
+try:
+    from scripts.Colaborador.sincronizar_bp_autority_bp_algoritimo import (
+        token_colaborador_authority,
+        token_departamento,
+    )
+except ModuleNotFoundError:  # Execucao direta: sys.path aponta para scripts/Colaborador.
+    from sincronizar_bp_autority_bp_algoritimo import (  # type: ignore[no-redef]
+        token_colaborador_authority,
+        token_departamento,
+    )
 
 SHEET_BP_ALGORITIMO = "BP ALGORITIMO"
 SHEET_BP_AUTORITY = "BP AUTORITY"
@@ -72,7 +82,7 @@ def calcular_plano(bp_algoritimo: list[list[str]], bp_autority: list[list[str]])
             col_str = str(col).strip()
             if col_str.upper().startswith("COLABORADOR_"):
                 if is_true(get(row_auth, idx_auth, col_str)):
-                    dept_token = col_str.replace("COLABORADOR_", "").upper()
+                    dept_token = token_colaborador_authority(col_str)
                     autority_vinculos.add((id_user, dept_token))
 
     # Auditar BP ALGORITIMO
@@ -92,7 +102,7 @@ def calcular_plano(bp_algoritimo: list[list[str]], bp_autority: list[list[str]])
 
         # Critério 2: Vínculo não existe em BP AUTORITY
         if id_user:
-            dept_token = departamento.upper().replace(" ", "").replace("D.", "")
+            dept_token = token_departamento(departamento)
             if (id_user, dept_token) not in autority_vinculos:
                 plano.remover_sem_autority.append(linha)
                 continue

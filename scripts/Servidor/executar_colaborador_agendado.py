@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pastoreio_orquestrador.ntfy_alertas import notificar_transicao
 from pastoreio_orquestrador.saude_colaborador import gravar_saude, ler_saude
 
@@ -31,6 +32,8 @@ LAST_LOG = RUNTIME_DIR / "colaborador_ultimo.log"
 NTFY_STATE_FILE = RUNTIME_DIR / "colaborador_ntfy_state.json"
 HEALTH_FILE = RUNTIME_DIR / "colaborador_health.json"
 COCKPIT = ROOT_DIR / "scripts" / "Colaborador" / "cockpit_colaborador.py"
+
+load_dotenv(ROOT_DIR / ".env")
 
 
 def cleanup_temp_logs(active_tmp: Path | None = None) -> None:

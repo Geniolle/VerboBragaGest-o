@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pastoreio_orquestrador.ntfy_alertas import notificar_transicao
 from pastoreio_orquestrador.saude_colaborador import ler_saude
 
@@ -14,6 +15,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = ROOT_DIR / "runtime"
 HEALTH_FILE = RUNTIME_DIR / "colaborador_health.json"
 NTFY_STATE_FILE = RUNTIME_DIR / "colaborador_ntfy_state.json"
+
+load_dotenv(ROOT_DIR / ".env")
 
 
 def parse_datetime(value: object) -> datetime | None:

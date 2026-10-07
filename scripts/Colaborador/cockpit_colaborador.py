@@ -25,6 +25,7 @@ class Etapa:
     nome: str
     script: str
     aplica: bool = False
+    usa_cache: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ ETAPAS = [
         "7.5. Limpar BP ALGORITIMO de linhas obsoletas",
         "limpar_bp_algoritimo.py",
         aplica=True,
+        usa_cache=True,
     ),
     Etapa(
         "8. Sincronizar BP AUTORITY -> ID_MANAGER (managers por departamento)",
@@ -94,7 +96,7 @@ def run_etapa(etapa: Etapa, aplicar: bool, no_cache: bool = False) -> ResultadoE
     cmd = [sys.executable, str(BASE_DIR / etapa.script)]
     if aplicar and etapa.aplica:
         cmd.append("--aplicar")
-    if not no_cache:
+    if not no_cache and etapa.usa_cache:
         cmd.append("--use-cache")
 
     print("", flush=True)

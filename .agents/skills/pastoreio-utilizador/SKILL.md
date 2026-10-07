@@ -72,6 +72,12 @@ concorrentes. Para instalar no servidor:
 sudo scripts/Servidor/instalar_timer_colaborador_systemd.sh
 ```
 
+Alertas operacionais do runner usam ntfy quando `NTFY_URL` está configurada
+no `.env` do servidor. O runner notifica somente a primeira falha e a
+recuperação posterior, persistindo o estado em
+`runtime/colaborador_ntfy_state.json`; falhas repetidas não geram spam.
+`NTFY_TOKEN` é opcional e nunca deve ser versionado.
+
 Verificações úteis no servidor:
 
 ```text

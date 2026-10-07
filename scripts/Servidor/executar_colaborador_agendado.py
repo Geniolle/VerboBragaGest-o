@@ -20,11 +20,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pastoreio_orquestrador.ntfy_alertas import notificar_transicao
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = ROOT_DIR / "runtime"
 LOCK_FILE = RUNTIME_DIR / "colaborador.lock"
 LAST_LOG = RUNTIME_DIR / "colaborador_ultimo.log"
+NTFY_STATE_FILE = RUNTIME_DIR / "colaborador_ntfy_state.json"
 COCKPIT = ROOT_DIR / "scripts" / "Colaborador" / "cockpit_colaborador.py"
 
 
@@ -162,6 +165,12 @@ def run_cockpit(aplicar: bool) -> int:
 
         os.replace(tmp_path, LAST_LOG)
         cleanup_temp_logs()
+        status_ntfy = notificar_transicao(
+            exit_code=result.returncode,
+            state_file=NTFY_STATE_FILE,
+            timestamp=now_iso(),
+        )
+        print(f"[NTFY] {status_ntfy}", flush=True)
         return result.returncode
     finally:
         if tmp_path.exists():

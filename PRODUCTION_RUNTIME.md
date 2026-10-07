@@ -3,6 +3,12 @@
 The productive Colaborador process should run as a `systemd` timer/service on
 the same server model used by Tesouraria-SOMA.
 
+The runner shares a rolling read-quota budget across every Colaborador
+subprocess, prefetches operational worksheets with one batch read, and uses a
+run-scoped cache invalidated by `SpreadsheetGuard` writes. A Sheets `429`
+waits across the quota refill window before retrying. The cache is deleted at
+the end of the run; only the rolling quota state remains in `runtime/`.
+
 ## Active Production
 
 - Host: `opc@servidor-tesouraria-v2`

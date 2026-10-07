@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,8 @@ LOCK_FILE = RUNTIME_DIR / "colaborador.lock"
 LAST_LOG = RUNTIME_DIR / "colaborador_ultimo.log"
 NTFY_STATE_FILE = RUNTIME_DIR / "colaborador_ntfy_state.json"
 HEALTH_FILE = RUNTIME_DIR / "colaborador_health.json"
+SHEETS_QUOTA_STATE = RUNTIME_DIR / "colaborador_sheets_quota.json"
+SHEETS_CACHE_DIR = RUNTIME_DIR / "colaborador_sheets_cache"
 COCKPIT = ROOT_DIR / "scripts" / "Colaborador" / "cockpit_colaborador.py"
 
 load_dotenv(ROOT_DIR / ".env")
@@ -132,6 +135,7 @@ def build_command(aplicar: bool) -> list[str]:
 def run_cockpit(aplicar: bool) -> int:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     cleanup_temp_logs()
+    shutil.rmtree(SHEETS_CACHE_DIR, ignore_errors=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix="colaborador_",
         suffix=".log.tmp",
@@ -165,6 +169,8 @@ def run_cockpit(aplicar: bool) -> int:
 
             child_env = os.environ.copy()
             child_env["PASTOREIO_HEALTH_FILE"] = str(HEALTH_FILE)
+            child_env["PASTOREIO_SHEETS_QUOTA_STATE"] = str(SHEETS_QUOTA_STATE)
+            child_env["PASTOREIO_SHEETS_SHARED_CACHE_DIR"] = str(SHEETS_CACHE_DIR)
             result = subprocess.run(
                 build_command(aplicar),
                 cwd=ROOT_DIR,
@@ -207,6 +213,7 @@ def run_cockpit(aplicar: bool) -> int:
         print(f"[NTFY] {status_ntfy}", flush=True)
         return result.returncode
     finally:
+        shutil.rmtree(SHEETS_CACHE_DIR, ignore_errors=True)
         if tmp_path.exists():
             try:
                 tmp_path.unlink()

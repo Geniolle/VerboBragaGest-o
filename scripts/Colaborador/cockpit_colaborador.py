@@ -17,11 +17,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pastoreio_orquestrador.saude_colaborador import gravar_saude
+from pastoreio_orquestrador.config import load_settings
+from pastoreio_orquestrador.sheets_client import SpreadsheetGuard
 
 
 BASE_DIR = Path(__file__).resolve().parent
 ETAPA_TIMEOUT_SECONDS = 1800
 HEALTH_FILE = Path(os.environ["PASTOREIO_HEALTH_FILE"]) if os.environ.get("PASTOREIO_HEALTH_FILE") else None
+PREFETCH_SHEETS = [
+    "Membresia",
+    "BP SERVICE",
+    "BP COLABORADOR",
+    "BP AUTORITY",
+    "BP ALGORITIMO",
+    "ID_MANAGER",
+]
 
 
 @dataclass(frozen=True)
@@ -142,6 +152,10 @@ def main() -> None:
     print(f"Modo: {'APLICAR' if args.aplicar else 'DRY-RUN'}", flush=True)
     print(f"Cache: {'DESATIVADO' if args.no_cache else 'ATIVADO'}", flush=True)
     print("###############################################################################", flush=True)
+
+    if os.environ.get("PASTOREIO_SHEETS_SHARED_CACHE_DIR") and not args.no_cache:
+        print("[CACHE] prefetch batch das sheets do Colaborador", flush=True)
+        SpreadsheetGuard(load_settings()).prefetch_worksheets(PREFETCH_SHEETS)
 
     resultados = []
     started_at = time.perf_counter()

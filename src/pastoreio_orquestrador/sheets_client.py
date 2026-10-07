@@ -15,12 +15,14 @@ import time
 from typing import Optional
 from collections import deque
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 
 from pastoreio_orquestrador.config import Settings
+from pastoreio_orquestrador.sheets_runtime import SharedReadQuotaLimiter, SharedSheetsCache
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -62,10 +64,6 @@ class SpreadsheetGuard:
     def __init__(self, settings: Settings, writable_original_titles: set[str] | None = None):
         self.settings = settings
         self.writable_original_titles = set(writable_original_titles or set())
-        self.client = get_client(settings)
-        self.spreadsheet = self.client.open_by_key(settings.spreadsheet_id)
-
-        # Cache de leitura
         self._worksheet_cache: dict[str, list[list[str]]] = {}
         self._worksheet_objects: dict[str, gspread.Worksheet] = {}
 
@@ -82,11 +80,58 @@ class SpreadsheetGuard:
         # Configuração de retry
         self.max_retries = int(os.getenv('GOOGLE_SHEETS_MAX_RETRIES', '5'))
         self.backoff_base = int(os.getenv('GOOGLE_SHEETS_BACKOFF_BASE_SECONDS', '2'))
+        self.quota_retry_min_wait = float(os.getenv('GOOGLE_SHEETS_429_MIN_WAIT_SECONDS', '65'))
+
+        quota_state = os.getenv("PASTOREIO_SHEETS_QUOTA_STATE")
+        self._shared_quota_limiter = (
+            SharedReadQuotaLimiter(
+                Path(quota_state),
+                limit=int(os.getenv("GOOGLE_SHEETS_SHARED_READ_LIMIT", "45")),
+            )
+            if quota_state
+            else None
+        )
+        cache_dir = os.getenv("PASTOREIO_SHEETS_SHARED_CACHE_DIR")
+        self._shared_cache = SharedSheetsCache(Path(cache_dir)) if cache_dir else None
+
+        self.client = get_client(settings)
+        self.spreadsheet = self._execute_read(
+            lambda: self.client.open_by_key(settings.spreadsheet_id),
+            "abrir spreadsheet",
+        )
 
         # Rate limiting (60 reads/minuto)
         self.quota_limit_per_minute = 60
         self.quota_threshold = 50  # Parar em 50 para margem
         self.read_timestamps = deque()  # Timestamps das últimas leituras
+
+    def _execute_read(self, operation, description: str):
+        """Executa uma leitura com quota partilhada e retry que cruza 1 minuto."""
+        for tentativa in range(getattr(self, "max_retries", 1)):
+            limiter = getattr(self, "_shared_quota_limiter", None)
+            if limiter is not None:
+                limiter.acquire()
+            try:
+                return operation()
+            except APIError as exc:
+                if exc.code != 429 or tentativa >= self.max_retries - 1:
+                    raise
+                self.metrics['retries'] = self.metrics.get('retries', 0) + 1
+                delay = max(
+                    getattr(self, "quota_retry_min_wait", 0),
+                    self.backoff_base * (2 ** tentativa),
+                )
+                headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+                try:
+                    delay = max(delay, float(headers.get("Retry-After", 0)))
+                except (TypeError, ValueError):
+                    pass
+                print(
+                    f"[WAITING_QUOTA] 429 em {description}; tentativa "
+                    f"{tentativa + 1}/{self.max_retries}, aguardando {delay:.1f}s",
+                    flush=True,
+                )
+                time.sleep(delay)
 
     def list_worksheet_titles(self) -> list[str]:
         return [ws.title for ws in self.spreadsheet.worksheets()]
@@ -109,54 +154,58 @@ class SpreadsheetGuard:
             self.metrics['by_sheet'][title]['cache_hits'] += 1
             return self._worksheet_cache[title]
 
+        shared_cache = getattr(self, "_shared_cache", None)
+        if not force_refresh and shared_cache is not None:
+            cached = shared_cache.load(title)
+            if cached is not None:
+                self._worksheet_cache[title] = cached
+                self.metrics['cache_hits'] += 1
+                return cached
+
         if force_refresh:
             self.metrics['force_refreshes'] += 1
 
         # Rate limiting: parar se aproximar do limite de quota
         self._check_rate_limit()
 
-        # Reler da API com retry
-        for tentativa in range(self.max_retries):
-            try:
-                ws = self.spreadsheet.worksheet(title)
-                dados = ws.get_all_values()
+        # Reler da API com retry partilhado
+        def do_read():
+            ws = self.spreadsheet.worksheet(title)
+            dados = ws.get_all_values()
 
-                # Guardar em cache
-                self._worksheet_cache[title] = dados
-                self._worksheet_objects[title] = ws
+            # Guardar em cache
+            self._worksheet_cache[title] = dados
+            self._worksheet_objects[title] = ws
 
-                # Instrumentação + rate limiting tracking
-                self.metrics['api_reads'] += 1
-                self.read_timestamps.append(datetime.now())  # Rastrear para rate limit
-                if title not in self.metrics['by_sheet']:
-                    self.metrics['by_sheet'][title] = {'api_reads': 0, 'cache_hits': 0}
-                self.metrics['by_sheet'][title]['api_reads'] += 1
+            # Instrumentação + rate limiting tracking
+            self.metrics['api_reads'] += 1
+            self.read_timestamps.append(datetime.now())  # Rastrear para rate limit
+            if title not in self.metrics['by_sheet']:
+                self.metrics['by_sheet'][title] = {'api_reads': 0, 'cache_hits': 0}
+            self.metrics['by_sheet'][title]['api_reads'] += 1
+            if shared_cache is not None:
+                shared_cache.save(title, dados)
+            return dados
 
-                return dados
+        return self._execute_read(do_read, f"ler {title}")
 
-            except APIError as e:
-                if e.code == 429:
-                    self.metrics['retries'] += 1
-
-                    if tentativa < self.max_retries - 1:
-                        # Calcular delay com backoff exponencial
-                        delay = self.backoff_base * (2 ** tentativa)
-
-                        # Respeitar Retry-After se existir
-                        if hasattr(e, 'response') and hasattr(e.response, 'headers'):
-                            retry_after = e.response.headers.get('Retry-After')
-                            if retry_after:
-                                try:
-                                    delay = int(retry_after)
-                                except (ValueError, TypeError):
-                                    pass
-
-                        time.sleep(delay)
-                    else:
-                        raise
-                else:
-                    # Erro não transitório: falhar imediatamente
-                    raise
+    def prefetch_worksheets(self, titles: list[str]) -> None:
+        """Carrega várias abas numa única chamada values.batchGet."""
+        shared_cache = getattr(self, "_shared_cache", None)
+        missing = [title for title in titles if shared_cache is None or shared_cache.load(title) is None]
+        if not missing:
+            return
+        ranges = [f"'{title.replace(chr(39), chr(39) * 2)}'" for title in missing]
+        response = self._execute_read(
+            lambda: self.spreadsheet.values_batch_get(ranges),
+            "batchGet inicial",
+        )
+        for title, value_range in zip(missing, response.get("valueRanges", [])):
+            rows = value_range.get("values", [])
+            self._worksheet_cache[title] = rows
+            if shared_cache is not None:
+                shared_cache.save(title, rows)
+        self.metrics['api_reads'] += 1
 
     def _invalidate_cache(self, title: str) -> None:
         """Invalidar cache da sheet após escrita."""
@@ -164,6 +213,9 @@ class SpreadsheetGuard:
             del self._worksheet_cache[title]
         if title in self._worksheet_objects:
             del self._worksheet_objects[title]
+        shared_cache = getattr(self, "_shared_cache", None)
+        if shared_cache is not None:
+            shared_cache.invalidate(title)
 
     def _check_rate_limit(self) -> None:
         """Verificar quota de leituras (60/minuto). Pausa se aproximar do limite."""
@@ -203,6 +255,10 @@ class SpreadsheetGuard:
                 "ou em abas produtivas explicitamente autorizadas pelo processo."
             )
 
+    def _record_write(self, title: str) -> None:
+        self._invalidate_cache(title)
+        self.metrics['writes'] = self.metrics.get('writes', 0) + 1
+
     def duplicate_sheet_for_testing(self, original_title: str) -> gspread.Worksheet:
         """Duplica uma aba original criando/ substituindo a copia
         CLAUDE_<original_title>. A aba original nunca e tocada."""
@@ -217,21 +273,20 @@ class SpreadsheetGuard:
             source_sheet_id=original_ws.id,
             new_sheet_name=claude_title,
         )
+        self._record_write(claude_title)
         return new_ws
 
     def update_worksheet(self, title: str, values: list[list]) -> None:
         self._assert_can_write(title)
         ws = self.spreadsheet.worksheet(title)
         ws.update(values, "A1")
-        self._invalidate_cache(title)
-        self.metrics['writes'] += 1
+        self._record_write(title)
 
     def update_cell(self, title: str, row: int, col: int, value: str) -> None:
         self._assert_can_write(title)
         ws = self.spreadsheet.worksheet(title)
         ws.update_cell(row, col, value)
-        self._invalidate_cache(title)
-        self.metrics['writes'] += 1
+        self._record_write(title)
 
     def batch_update_cells(self, title: str, updates: list[tuple[int, int, str]]) -> None:
         """Escreve varias celulas (possivelmente nao-contiguas, ex.: uma
@@ -251,8 +306,7 @@ class SpreadsheetGuard:
             for row, col, value in updates
         ]
         ws.batch_update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
-        self._invalidate_cache(title)
-        self.metrics['writes'] += 1
+        self._record_write(title)
 
     def batch_clear_cells(self, title: str, cells: list[tuple[int, int]]) -> None:
         """Limpa varias celulas numa unica chamada de API."""
@@ -262,11 +316,13 @@ class SpreadsheetGuard:
         ws = self.spreadsheet.worksheet(title)
         ranges = [gspread.utils.rowcol_to_a1(row, col) for row, col in cells]
         ws.batch_clear(ranges)
+        self._record_write(title)
 
     def append_row(self, title: str, values: list[str]) -> None:
         self._assert_can_write(title)
         ws = self.spreadsheet.worksheet(title)
         ws.append_row(values)
+        self._record_write(title)
 
     def append_rows(self, title: str, rows: list[list[str]]) -> None:
         """Acrescenta varias linhas numa UNICA chamada de API (mesmo motivo
@@ -277,6 +333,7 @@ class SpreadsheetGuard:
             return
         ws = self.spreadsheet.worksheet(title)
         ws.append_rows(rows, value_input_option=gspread.utils.ValueInputOption.user_entered)
+        self._record_write(title)
 
     def create_worksheet(self, title: str, rows: int = 100, cols: int = 26) -> gspread.Worksheet:
         """Cria uma aba nova.
@@ -293,7 +350,9 @@ class SpreadsheetGuard:
                     "A allowlist produtiva permite escrita, nao delete/recreate."
                 )
             self.spreadsheet.del_worksheet(existing[title])
-        return self.spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+        ws = self.spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+        self._record_write(title)
+        return ws
 
     def ensure_worksheet_with_header(
         self, title: str, header: list[str], rows: int = 1000, cols: int | None = None
@@ -309,9 +368,11 @@ class SpreadsheetGuard:
             header_atual = ws.row_values(1)
             if [str(v).strip() for v in header_atual] != [str(v).strip() for v in header]:
                 ws.update([header], "A1")
+                self._record_write(title)
             return ws
         ws = self.spreadsheet.add_worksheet(title=title, rows=rows, cols=cols or len(header))
         ws.update([header], "A1")
+        self._record_write(title)
         return ws
 
     def delete_worksheet(self, title: str) -> None:
@@ -322,6 +383,7 @@ class SpreadsheetGuard:
             )
         ws = self.spreadsheet.worksheet(title)
         self.spreadsheet.del_worksheet(ws)
+        self._record_write(title)
 
     def delete_rows(self, title: str, rows: list[int]) -> None:
         """Apaga linhas especificas de uma aba permitida, de baixo para cima.
@@ -335,5 +397,4 @@ class SpreadsheetGuard:
         ws = self.spreadsheet.worksheet(title)
         for row in sorted(set(rows), reverse=True):
             ws.delete_rows(row)
-        self._invalidate_cache(title)
-        self.metrics['writes'] += 1
+        self._record_write(title)

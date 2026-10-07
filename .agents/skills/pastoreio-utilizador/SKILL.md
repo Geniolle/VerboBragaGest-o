@@ -72,6 +72,15 @@ concorrentes. Para instalar no servidor:
 sudo scripts/Servidor/instalar_timer_colaborador_systemd.sh
 ```
 
+Para respeitar a quota da Google Sheets, o runner configura um limitador de
+janela movel partilhado entre os subprocessos e um cache exclusivo da
+execucao. O cockpit faz um `values.batchGet` inicial das sheets operacionais;
+escritas via `SpreadsheetGuard` invalidam somente a sheet alterada. Um
+`HTTP 429` aguarda pelo menos uma janela de quota e e repetido antes de a
+execucao ser declarada falhada. O estado de quota e sobrescrito em
+`runtime/colaborador_sheets_quota.json`; o cache e removido ao fim da
+execucao e nao constitui historico.
+
 Alertas operacionais do runner usam ntfy quando `NTFY_URL` está configurada
 no `.env` do servidor. O runner notifica somente a primeira falha e a
 recuperação posterior, persistindo o estado em

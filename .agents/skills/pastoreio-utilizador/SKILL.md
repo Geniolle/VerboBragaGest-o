@@ -86,8 +86,10 @@ inativo, o snapshot está atrasado ou a última execução falhou. Um serviço
 `Type=oneshot` saudável fica `inactive` depois de terminar; o estado correto
 é determinado pelo snapshot, pelo resultado e pela atualidade da execução.
 
-A etapa destrutiva de limpeza de `BP ALGORITIMO` deve sempre reler as Sheets
-sem cache e bloquear aplicação quando o número de remoções exceder
+A limpeza física de `BP ALGORITIMO` não faz parte do cockpit automático:
+linhas inativas/legadas são preservadas e podem receber correção de `ID_USER`.
+Quando a limpeza for auditada manualmente, deve sempre reler as Sheets sem
+cache e bloquear aplicação quando o número de remoções exceder
 `PASTOREIO_MAX_DELETE_BP_ALGORITIMO`.
 
 Verificações úteis no servidor:

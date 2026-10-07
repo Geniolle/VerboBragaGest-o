@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from scripts.Colaborador.cockpit_colaborador import Etapa, run_etapa
+from scripts.Colaborador.cockpit_colaborador import ETAPAS
 
 
 @patch("scripts.Colaborador.cockpit_colaborador.subprocess.run")
@@ -33,3 +34,7 @@ def test_no_cache_remove_opcao_mesmo_quando_etapa_suporta(run_mock):
 
     cmd = run_mock.call_args.args[0]
     assert "--use-cache" not in cmd
+
+
+def test_limpeza_fisica_nao_faz_parte_do_cockpit_automatico():
+    assert "limpar_bp_algoritimo.py" not in {etapa.script for etapa in ETAPAS}

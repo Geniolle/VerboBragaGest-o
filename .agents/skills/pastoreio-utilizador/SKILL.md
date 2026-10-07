@@ -21,8 +21,9 @@ Ordem oficial de execução dos subprocessos:
 3. validar `BP SERVICE.DEPARTAMENTOS` contra colunas `D.*`;
 4. atualizar `BP COLABORADOR` a partir de `BP SERVICE`;
 5. atualizar `BP AUTORITY` a partir de `BP SERVICE`;
-6. reconciliar/remover lixo de `BP AUTORITY` contra `BP SERVICE`;
-7. sincronizar `BP AUTORITY -> BP ALGORITIMO`.
+6. reconciliar flags agregadas de Manager/Coordenador em `BP AUTORITY`;
+7. reconciliar/remover lixo de `BP AUTORITY` contra `BP SERVICE`;
+8. sincronizar `BP AUTORITY -> BP ALGORITIMO`.
 
 O cockpit roda em dry-run por padrão:
 
@@ -180,6 +181,29 @@ validar o plano:
 ```text
 uv run python scripts/Colaborador/atualizar_bp_autority.py
 uv run python scripts/Colaborador/atualizar_bp_autority.py --aplicar
+```
+
+## Subprocesso: Reconciliar flags de Manager/Coordenador
+
+Implementação:
+`../../../scripts/Colaborador/reconciliar_flags_papeis_bp_autority.py`.
+
+Objetivo: manter as flags agregadas de papel em `BP AUTORITY` consistentes
+com os vínculos detalhados da própria linha:
+
+- se alguma coluna `MANAGER_*` estiver `TRUE`,
+  `DEPARTAMENTOS_MANAGER` deve ficar `TRUE`; sem nenhum `MANAGER_* = TRUE`,
+  deve ficar vazia;
+- se alguma coluna `COORDENADOR_*` estiver `TRUE`,
+  `DEPARTAMENTOS_COORDENADOR` deve ficar `TRUE`; sem nenhum
+  `COORDENADOR_* = TRUE`, deve ficar vazia.
+
+O subprocesso roda em dry-run por padrão e escreve somente em `BP AUTORITY`,
+via `SpreadsheetGuard`:
+
+```text
+uv run python scripts/Colaborador/reconciliar_flags_papeis_bp_autority.py
+uv run python scripts/Colaborador/reconciliar_flags_papeis_bp_autority.py --aplicar
 ```
 
 ## Subprocesso: Atualizar BP COLABORADOR

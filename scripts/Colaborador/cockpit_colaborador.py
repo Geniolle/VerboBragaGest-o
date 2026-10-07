@@ -58,6 +58,11 @@ ETAPAS = [
         aplica=True,
     ),
     Etapa(
+        "5.5. Reconciliar flags de Manager/Coordenador em BP AUTORITY",
+        "reconciliar_flags_papeis_bp_autority.py",
+        aplica=True,
+    ),
+    Etapa(
         "6. Reconciliar cadeia transacional: BP ALGORITIMO -> BP AUTORITY -> BP SERVICE",
         "reconciliar_cadeia_departamentos.py",
         aplica=True,

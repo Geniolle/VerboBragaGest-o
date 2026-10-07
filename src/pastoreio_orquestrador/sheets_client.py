@@ -251,6 +251,8 @@ class SpreadsheetGuard:
             for row, col, value in updates
         ]
         ws.batch_update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
+        self._invalidate_cache(title)
+        self.metrics['writes'] += 1
 
     def batch_clear_cells(self, title: str, cells: list[tuple[int, int]]) -> None:
         """Limpa varias celulas numa unica chamada de API."""

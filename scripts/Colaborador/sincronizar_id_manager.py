@@ -98,6 +98,17 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def valor_texto_para_sheet(value: str) -> str:
+    """Preserva valores iniciados por ``+`` quando escritos como USER_ENTERED.
+
+    Sem o apóstrofo, o Google Sheets interpreta telefones internacionais como
+    números e remove o sinal, fazendo a sincronização deixar de ser idempotente.
+    """
+
+    text = str(value or "")
+    return f"'{text}" if text.startswith("+") else text
+
+
 def calcular_plano(bp_autority: list[list[str]], id_manager: list[list[str]]) -> PlanoSincronizacaoIdManager:
     """Calcula plano de sincronização de ID_MANAGER."""
 
@@ -324,7 +335,13 @@ def aplicar_plano(guard: SpreadsheetGuard, id_manager: list[list[str]], plano: P
         updates = []
         for linha, entry in plano.atualizar:
             if COL_TELEFONE in idx_manager:
-                updates.append((linha, idx_manager[COL_TELEFONE] + 1, entry.telefone))
+                updates.append(
+                    (
+                        linha,
+                        idx_manager[COL_TELEFONE] + 1,
+                        valor_texto_para_sheet(entry.telefone),
+                    )
+                )
             if COL_EMAIL in idx_manager:
                 updates.append((linha, idx_manager[COL_EMAIL] + 1, entry.email))
 
